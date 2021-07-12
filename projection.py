@@ -122,6 +122,7 @@ def projection():
         g_props = f.create_group(f.root, 'props')
         for prop_name in prop_mesh_markers.keys():
             g_prop = f.create_group(g_props, prop_name)
+            f.create_earray(g_prop, 'quality', tables.atom.Float64Atom(), (0,))
             f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
             g_translation = f.create_group(g_prop, 'translation')
             for marker_name in prop_mesh_markers[prop_name].keys():
@@ -188,6 +189,7 @@ def projection():
                 marker_count = client.get_marker_count(prop_name)
 
                 prop_quality = client.get_subject_quality(prop_name)
+                g_props[prop_name].quality.append([prop_quality])
 
                 if prop_quality is not None:
                     root_segment = client.get_subject_root_segment_name(prop_name)
@@ -304,10 +306,12 @@ def projection():
 
     f_vicon = tables.open_file(f_vicon_name, mode='r')
     f_vicon_timestamp = f_vicon.root.timestamp.iterrows()
+    f_vicon_quality = {}
     f_vicon_rotation = {}
     f_vicon_translation = {}
     for prop in f_vicon.root.props:
         prop_name = prop._v_name
+        f_vicon_quality[prop_name] = prop.quality.iterrows()
         f_vicon_rotation[prop_name] = prop.rotation.iterrows()
         f_vicon_translation[prop_name] = {}
         for marker in prop.translation:
@@ -332,8 +336,16 @@ def projection():
         return timestamp_a, timestamp_b, image
 
 
-    def get_next_vicon(f_timestamp, f_translation, f_rotation, usec_offset=0):
+    def get_next_vicon(f_timestamp, f_quality, f_rotation, f_translation, usec_offset=0):
         timestamp = np.uint64(next(f_timestamp) + usec_offset)
+
+        quality = {}
+        for prop_name in f_quality.keys():
+            quality[prop_name] = next(f_quality[prop_name])
+
+        rotation = {}
+        for prop_name in f_rotation.keys():
+            rotation[prop_name] = next(f_rotation[prop_name])
 
         translation = {}
         for prop_name in f_translation.keys():
@@ -341,11 +353,7 @@ def projection():
             for marker_name in f_translation[prop_name].keys():
                 translation[prop_name][marker_name] = next(f_translation[prop_name][marker_name])
 
-        rotation = {}
-        for prop_name in f_rotation.keys():
-            rotation[prop_name] = next(f_rotation[prop_name])
-
-        return timestamp, translation, rotation
+        return timestamp, quality, rotation, translation
 
 
     blue = (255, 0, 0)
@@ -368,8 +376,9 @@ def projection():
         f_frame_image_video, cv2.VideoWriter_fourcc(*'MJPG'),
         30, dv_frame_shape[1::-1])
 
-    vicon_timestamp, vicon_translation, vicon_rotation = get_next_vicon(
-        f_vicon_timestamp, f_vicon_translation, f_vicon_rotation,
+    vicon_timestamp, vicon_quality, vicon_rotation, vicon_translation = get_next_vicon(
+        f_vicon_timestamp, f_vicon_quality, f_vicon_rotation, f_vicon_translation,
+        usec_offset=vicon_usec_offset,
     )
 
     dv_event_timestamp, dv_event_polarity, dv_event_x, dv_event_y = get_next_dv_event(
@@ -401,8 +410,9 @@ def projection():
 
         # get next Vicon frame
         try:
-            vicon_timestamp_new, vicon_translation_new, vicon_rotation_new = get_next_vicon(
-                f_vicon_timestamp, f_vicon_translation, f_vicon_rotation, usec_offset=vicon_usec_offset,
+            vicon_timestamp_new, vicon_quality_new, vicon_rotation_new, vicon_translation_new = get_next_vicon(
+                f_vicon_timestamp, f_vicon_quality, f_vicon_rotation, f_vicon_translation,
+                usec_offset=vicon_usec_offset,
             )
 
         except StopIteration:
@@ -411,6 +421,7 @@ def projection():
         # get timestamp halfway between now and the next vicon frame
         vicon_timestamp_midway = (vicon_timestamp + vicon_timestamp_new) / 2
         vicon_timestamp = vicon_timestamp_new
+        vicon_quality = vicon_quality_new
         vicon_translation = vicon_translation_new
         vicon_rotation = vicon_rotation_new
 
