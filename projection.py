@@ -222,17 +222,9 @@ def projection():
 
     record = True
 
-    test_name = 'human_hold'
+    test_name = 'no_human'
 
-
-
-
-
-
-
-
-
-    test_number = 5
+    test_number = 0
 
     stop_seconds = 10
     stop_time = int(datetime.now().timestamp() * 1000000) + stop_seconds * 1000000
@@ -324,7 +316,7 @@ def projection():
 
 
     def get_next_dv_event(f_timestamp, f_polarity, f_x, f_y, usec_offset=0):
-        timestamp = next(f_timestamp) + usec_offset
+        timestamp = np.uint64(next(f_timestamp) + usec_offset)
         polarity = next(f_polarity)
         x = next(f_x)
         y = next(f_y)
@@ -333,15 +325,15 @@ def projection():
 
 
     def get_next_dv_frame(f_timestamp_a, f_timestamp_b, f_image, usec_offset=0):
-        timestamp_a = next(f_timestamp_a) + usec_offset
-        timestamp_b = next(f_timestamp_b) + usec_offset
+        timestamp_a = np.uint64(next(f_timestamp_a) + usec_offset)
+        timestamp_b = np.uint64(next(f_timestamp_b) + usec_offset)
         image = next(f_image)
 
         return timestamp_a, timestamp_b, image
 
 
     def get_next_vicon(f_timestamp, f_translation, f_rotation, usec_offset=0):
-        timestamp = next(f_timestamp) + usec_offset
+        timestamp = np.uint64(next(f_timestamp) + usec_offset)
 
         translation = {}
         for prop_name in f_translation.keys():
