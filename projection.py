@@ -62,7 +62,7 @@ def projection():
         f.close()
 
 
-    def get_dv_events(address, port, stop_time, camera_matrix, distortion_coefficients,
+    def get_dv_events(address, port, record_time, camera_matrix, distortion_coefficients,
                       f_name='./data/dv_event.h5'):
         f = tables.open_file(f_name, mode='w')
         f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
@@ -71,6 +71,8 @@ def projection():
         f_y = f.create_earray(f.root, 'y', tables.atom.UInt16Atom(), (0,))
 
         with dv.NetworkEventInput(address=address, port=port) as event_f:
+            event = next(event_f)
+            stop_time = event.timestamp + record_time
 
             for event in event_f:
                 if event.timestamp >= stop_time:
@@ -90,7 +92,7 @@ def projection():
         return
 
 
-    def get_dv_frames(address, port, stop_time, camera_matrix, distortion_coefficients,
+    def get_dv_frames(address, port, record_time, camera_matrix, distortion_coefficients,
                       f_name='./data/dv_frame.h5'):
         f = tables.open_file(f_name, mode='w')
         f_timestamp_a = f.create_earray(f.root, 'timestamp_a', tables.atom.UInt64Atom(), (0,))
@@ -98,24 +100,27 @@ def projection():
         f_image = f.create_earray(f.root, 'image', tables.atom.UInt8Atom(), (0, 260, 346, 3))
 
         with dv.NetworkFrameInput(address=address, port=port) as frame_f:
+            frame = next(frame_f)
+            stop_time = frame.timestamp_end_of_frame + record_time
 
             for frame in frame_f:
                 if frame.timestamp_end_of_frame >= stop_time:
                     break
 
-                image_distorted = frame.image[:, :, :]
-                image_undistorted = cv2.undistort(
-                    image_distorted, dv_camera_matrix, dv_distortion_coefficients, None, dv_camera_matrix)
+                # undistort frame
+                frame_distorted = frame.image[:, :, :]
+                frame_undistorted = cv2.undistort(
+                    frame_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)
 
                 f_timestamp_a.append([frame.timestamp_start_of_frame])
                 f_timestamp_b.append([frame.timestamp_end_of_frame])
-                f_image.append([image_undistorted])
+                f_image.append([frame_undistorted])
 
         f.close()
         return
 
 
-    def get_vicon_poses(address, port, stop_time, prop_mesh_markers,
+    def get_vicon_poses(address, port, record_time, prop_mesh_markers,
                         f_name='./data/vicon.h5'):
         f = tables.open_file(f_name, mode='w')
         f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
@@ -170,7 +175,8 @@ def projection():
                     assert(marker_name in prop_mesh_markers[prop_name].keys())
 
 
-        timestamp = 0
+        timestamp = int(datetime.now().timestamp() * 1000000)
+        stop_time = timestamp + record_time
 
         while timestamp < stop_time:
             result = client.get_frame()
@@ -222,17 +228,20 @@ def projection():
 
 
 
-    record = True
+    #record = True
+    record = False
 
     test_name = 'no_human'
 
     test_number = 0
 
-    stop_seconds = 10
-    stop_time = int(datetime.now().timestamp() * 1000000) + stop_seconds * 1000000
+    record_seconds = 10
+    #record_seconds = 100
+    record_time = record_seconds * 1000000
 
     #vicon_usec_offset = 183000
-    vicon_usec_offset = 157000
+    #vicon_usec_offset = 157000
+    vicon_usec_offset = 69000000
 
     distinguish_dv_event_polarity = False
 
@@ -259,15 +268,15 @@ def projection():
 
         processes = []
         processes.append(Process(target=get_dv_events,
-                                 args=(dv_address, dv_event_port, stop_time,
+                                 args=(dv_address, dv_event_port, record_time,
                                        dv_camera_matrix, dv_distortion_coefficients),
                                  kwargs={'f_name': f_dv_event_name}))
         processes.append(Process(target=get_dv_frames,
-                                 args=(dv_address, dv_frame_port, stop_time,
+                                 args=(dv_address, dv_frame_port, record_time,
                                        dv_camera_matrix, dv_distortion_coefficients),
                                  kwargs={'f_name': f_dv_frame_name}))
         processes.append(Process(target=get_vicon_poses,
-                                 args=(vicon_address, vicon_port, stop_time,
+                                 args=(vicon_address, vicon_port, record_time,
                                        prop_mesh_markers),
                                  kwargs={'f_name': f_vicon_name}))
 
