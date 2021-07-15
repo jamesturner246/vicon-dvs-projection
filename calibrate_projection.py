@@ -103,6 +103,94 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
 
     print('Vicon coordinates')
 
+    marker_count = len(marker_names)
+    marker_coordinates_file = f'./calibration-temp/vicon_coordinates_{i_epoch}.npy'
+    mean_coordinates = np.empty((marker_count, 3), dtype='float64')
+    median_coordinates = np.empty((marker_count, 3), dtype='float64')
+
+    if reuse:
+        marker_coordinates = np.load(marker_coordinates_file)
+
+
+
+
+
+
+
+
+    else:
+        marker_coordinates = np.empty((n_frame, marker_count, 3), dtype='float64')
+
+        from vicon_dssdk import ViconDataStream
+
+        client = ViconDataStream.Client()
+        client.Connect(f'{address}:{port}')
+        client.EnableMarkerData()
+
+        progress = tqdm(total=n_frame, leave=False)
+        i_frame = 0
+
+        while i_frame < n_frame:
+            if not client.GetFrame():
+                continue
+
+            try:
+                prop_quality = client.GetObjectQuality(prop_name)
+            except ViconDataStream.DataStreamException:
+                prop_quality = None
+
+            if prop_quality is not None:
+                actual_marker_names = client.GetMarkerNames(prop_name)
+                actual_marker_count = len(actual_marker_names)
+
+                for i_marker in range(actual_marker_count):
+                    marker_name = marker_names[i_marker]
+                    actual_marker_name = actual_marker_names[i_marker][0]
+                    assert(marker_name == actual_marker_name)
+
+                    translation = client.GetMarkerGlobalTranslation(prop_name, actual_marker_name)[0]
+                    marker_coordinates[i_frame, i_marker, :] = translation
+
+                i_frame += 1
+                progress.update(1)
+
+            time.sleep(t_frame)
+
+        progress.close()
+        
+        client.Disconnect()
+
+
+
+
+
+
+
+
+    if not reuse:
+        np.save(marker_coordinates_file, marker_coordinates)
+
+    # # compute mean Vicon coordinates
+    # mean_coordinates[:, :] = np.mean(marker_coordinates, 0)
+    # for i in range(marker_count):
+    #     print(f'name: {marker_names[i]:<15s} coordinates: {mean_coordinates[i]}')
+    #
+    # return mean_coordinates
+
+    # compute median Vicon coordinates
+    median_coordinates[:, :] = np.median(marker_coordinates, 0)
+    for i in range(marker_count):
+        print(f'name: {marker_names[i]:<15s} coordinates: {median_coordinates[i]}')
+
+    return median_coordinates
+
+
+def get_vicon_coordinates_pyvicon(i_epoch, address, port, prop_name, marker_names,
+                                  n_frame=100, t_frame=0.001,
+                                  reuse=False, debug=False):
+
+    print('Vicon coordinates')
+
     n_marker = len(marker_names)
     marker_coordinates_file = f'./calibration-temp/vicon_coordinates_{i_epoch}.npy'
     mean_coordinates = np.empty((n_marker, 3), dtype='float64')
@@ -321,9 +409,11 @@ def calibrate():
     debug = False
     test = True
 
-    reuse = True
+    reuse = False
     reuse_vicon = reuse
     reuse_dv = reuse
+
+    windows_vicon_sdk = True
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -336,7 +426,7 @@ def calibrate():
     n_marker = len(marker_names)
 
     # DV
-    dv_address, dv_event_port, dv_frame_port = '192.168.1.100', 36000, 36001
+    dv_address, dv_event_port, dv_frame_port = '127.0.0.1', 36000, 36001
     dv_frame_shape = (260, 346, 3)
     dv_n_event = 10000
     dv_wand_coordinates = np.empty((n_epoch, n_marker, 2), dtype='float64')
@@ -344,7 +434,7 @@ def calibrate():
     dv_distortion_coefficients = np.load('./calibration/camera_distortion_coefficients.npy')
 
     # Vicon
-    vicon_address, vicon_port = '192.168.1.1', 801
+    vicon_address, vicon_port = '127.0.0.1', 801
     vicon_n_frame = 100
     vicon_t_frame = 0.001
     vicon_wand_coordinates = np.empty((n_epoch, n_marker, 3), dtype='float64')
@@ -370,12 +460,6 @@ def calibrate():
             accept = input('accept epoch? (y/n): ')
             if accept == 'y':
                 i_epoch += 1
-
-
-
-
-
-
 
 
 
@@ -439,68 +523,153 @@ def calibrate():
 
 
     if test:
-        import pyvicon as pv
-
-        vicon_client = pv.PyVicon()
-        #print('version: ' + vicon_client.__version__)
-
-        result = vicon_client.connect(f'{vicon_address}:{vicon_port}')
-        #print('connect:', result)
-
-        result = vicon_client.enable_marker_data()
-        #print('enable_marker_data:', result)
 
 
-        image = np.empty(dv_frame_shape, dtype='uint8')
-
-        for dv_frame in dv.NetworkFrameInput(address=dv_address, port=dv_frame_port):
-            image[:, :, :] = cv2.undistort(
-                dv_frame.image, dv_camera_matrix, dv_distortion_coefficients, None, dv_camera_matrix)
-
-            result = vicon_client.get_frame()
-            #print('get_frame:', result)
-
-            if result == pv.Result.NoFrame:
-                continue
-
-            prop_count = vicon_client.get_subject_count()
-            #print('props:', prop_count)
-
-            for i_prop in range(prop_count):
-                prop_name = vicon_client.get_subject_name(i_prop)
-                #print('prop name:', prop_name)
-
-                prop_quality = vicon_client.get_subject_quality(prop_name)
-                #print(' ', prop_name, 'quality:', prop_quality)
-
-                if prop_quality is not None:
-                    marker_count = vicon_client.get_marker_count(prop_name)
-                    #print(' ', prop_name, 'markers:', marker_count)
-
-                    for i_marker in range(marker_count):
-
-                        marker_name = vicon_client.get_marker_name(prop_name, i_marker)
-                        #print('   ', prop_name, 'marker', i_marker, 'name:', marker_name)
-
-                        coordinates = vicon_client.get_marker_global_translation(prop_name, marker_name)
-                        #print('   ', prop_name, 'marker', i_marker, 'coordinates', coordinates)
-
-                        # transform from Vicon space to DV camera space
-                        coordinates = coordinates[np.newaxis, :]
-                        xy = np.dot(coordinates, dv_space_coefficients) + dv_space_constants
-                        xy = xy[:, :2] * (1.0 / xy[:, 2])
-                        xy_int = np.rint(xy).astype('int32')
-
-                        cv2.circle(image, (xy_int[0, 0], xy_int[0, 1]), 5, (0, 255, 0), -1)
-
-            cv2.imshow('image', image)
-            k = cv2.waitKey(1)
-            if k == 27 or k == ord('q'):
-                exit(0)
 
 
-        result = vicon_client.disconnect()
-        #print('disconnect:', result)
+
+        if windows_vicon_sdk: # OFFICIAL WINDOWS VICON SDK
+
+            from vicon_dssdk import ViconDataStream
+
+            vicon_client = ViconDataStream.Client()
+            #print('version: ' + str(vicon_client.GetVersion())
+            vicon_client.Connect(f'{vicon_address}:{vicon_port}')
+            vicon_client.EnableMarkerData()
+
+            image = np.empty(dv_frame_shape, dtype='uint8')
+
+            for dv_frame in dv.NetworkFrameInput(address=dv_address, port=dv_frame_port):
+                image[:, :, :] = cv2.undistort(
+                    dv_frame.image, dv_camera_matrix, dv_distortion_coefficients, None, dv_camera_matrix)
+
+                if not vicon_client.GetFrame():
+                    continue
+
+                prop_names = vicon_client.GetSubjectNames()
+                prop_count = len(prop_names)
+
+                for i_prop in range(prop_count):
+                    prop_name = prop_names[i_prop]
+
+                    marker_names = vicon_client.GetMarkerNames(prop_name)
+                    marker_count = len(marker_names)
+
+                    try:
+                        prop_quality = vicon_client.GetObjectQuality(prop_name)
+                    except ViconDataStream.DataStreamException:
+                        prop_quality = None
+
+                    if prop_quality is not None:
+
+                        for i_marker in range(marker_count):
+                            marker_name = marker_names[i_marker][0]
+
+                            translation = vicon_client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
+
+                            # transform from Vicon space to DV camera space
+                            translation = np.array([translation])
+                            xy = np.dot(translation, dv_space_coefficients) + dv_space_constants
+                            xy = xy[:, :2] * (1.0 / xy[:, 2])
+                            xy_int = np.rint(xy).astype('int32')
+
+                            cv2.circle(image, (xy_int[0, 0], xy_int[0, 1]), 5, (0, 255, 0), -1)
+
+                cv2.imshow('image', image)
+                k = cv2.waitKey(1)
+                if k == 27 or k == ord('q'):
+                    exit(0)
+
+            vicon_client.Disconnect()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        else: # PYVICON SDK
+
+            import pyvicon as pv
+
+            vicon_client = pv.PyVicon()
+            #print('version: ' + vicon_client.__version__)
+
+            result = vicon_client.connect(f'{vicon_address}:{vicon_port}')
+            #print('connect:', result)
+
+            result = vicon_client.enable_marker_data()
+            #print('enable_marker_data:', result)
+
+
+            image = np.empty(dv_frame_shape, dtype='uint8')
+
+            for dv_frame in dv.NetworkFrameInput(address=dv_address, port=dv_frame_port):
+                image[:, :, :] = cv2.undistort(
+                    dv_frame.image, dv_camera_matrix, dv_distortion_coefficients, None, dv_camera_matrix)
+
+                result = vicon_client.get_frame()
+                #print('get_frame:', result)
+
+                if result == pv.Result.NoFrame:
+                    continue
+
+                prop_count = vicon_client.get_subject_count()
+                #print('props:', prop_count)
+
+                for i_prop in range(prop_count):
+                    prop_name = vicon_client.get_subject_name(i_prop)
+                    #print('prop name:', prop_name)
+
+                    prop_quality = vicon_client.get_subject_quality(prop_name)
+                    #print(' ', prop_name, 'quality:', prop_quality)
+
+                    if prop_quality is not None:
+                        marker_count = vicon_client.get_marker_count(prop_name)
+                        #print(' ', prop_name, 'markers:', marker_count)
+
+                        for i_marker in range(marker_count):
+
+                            marker_name = vicon_client.get_marker_name(prop_name, i_marker)
+                            #print('   ', prop_name, 'marker', i_marker, 'name:', marker_name)
+
+                            coordinates = vicon_client.get_marker_global_translation(prop_name, marker_name)
+                            #print('   ', prop_name, 'marker', i_marker, 'coordinates', coordinates)
+
+                            # transform from Vicon space to DV camera space
+                            coordinates = coordinates[np.newaxis, :]
+                            xy = np.dot(coordinates, dv_space_coefficients) + dv_space_constants
+                            xy = xy[:, :2] * (1.0 / xy[:, 2])
+                            xy_int = np.rint(xy).astype('int32')
+
+                            cv2.circle(image, (xy_int[0, 0], xy_int[0, 1]), 5, (0, 255, 0), -1)
+
+                cv2.imshow('image', image)
+                k = cv2.waitKey(1)
+                if k == 27 or k == ord('q'):
+                    exit(0)
+
+
+            result = vicon_client.disconnect()
+            #print('disconnect:', result)
+
+
+
+
+
+
+
+
+
+
+
 
     return
 

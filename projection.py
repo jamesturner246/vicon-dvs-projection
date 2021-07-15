@@ -3,7 +3,6 @@ from datetime import datetime
 from multiprocessing import Process
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import LinearRegression
-import pyvicon as pv
 import numpy as np
 import tables
 import stl
@@ -11,12 +10,293 @@ import cv2
 import dv
 
 
+def create_labelled_data_file(f_name='./data/labelled.h5'):
+    f = tables.open_file(f_name, mode='w')
+    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
+    f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
+    f_x = f.create_earray(f.root, 'x', tables.atom.UInt16Atom(), (0,))
+    f_y = f.create_earray(f.root, 'y', tables.atom.UInt16Atom(), (0,))
+    f_label = f.create_earray(f.root, 'label', tables.atom.UInt8Atom(), (0,))
+    f.close()
+
+
+def get_dv_events(address, port, record_time, camera_matrix, distortion_coefficients,
+                  f_name='./data/dv_event.h5'):
+    f = tables.open_file(f_name, mode='w')
+    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
+    f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
+    f_x = f.create_earray(f.root, 'x', tables.atom.UInt16Atom(), (0,))
+    f_y = f.create_earray(f.root, 'y', tables.atom.UInt16Atom(), (0,))
+
+    with dv.NetworkEventInput(address=address, port=port) as event_f:
+        event = next(event_f)
+        stop_time = event.timestamp + record_time
+
+        for event in event_f:
+            if event.timestamp >= stop_time:
+                break
+
+            # undistort event
+            event_distorted = np.array([event.x, event.y], dtype='float64')
+            event_undistorted = cv2.undistortPoints(
+                event_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)[0, 0]
+
+            f_timestamp.append([event.timestamp])
+            f_polarity.append([event.polarity])
+            f_x.append([event_undistorted[0]])
+            f_y.append([event_undistorted[1]])
+
+    f.close()
+    return
+
+
+def get_dv_frames(address, port, record_time, camera_matrix, distortion_coefficients,
+                  f_name='./data/dv_frame.h5'):
+    f = tables.open_file(f_name, mode='w')
+    f_timestamp_a = f.create_earray(f.root, 'timestamp_a', tables.atom.UInt64Atom(), (0,))
+    f_timestamp_b = f.create_earray(f.root, 'timestamp_b', tables.atom.UInt64Atom(), (0,))
+    f_image = f.create_earray(f.root, 'image', tables.atom.UInt8Atom(), (0, 260, 346, 3))
+
+    with dv.NetworkFrameInput(address=address, port=port) as frame_f:
+        frame = next(frame_f)
+        stop_time = frame.timestamp_end_of_frame + record_time
+
+        for frame in frame_f:
+            if frame.timestamp_end_of_frame >= stop_time:
+                break
+
+            # undistort frame
+            frame_distorted = frame.image[:, :, :]
+            frame_undistorted = cv2.undistort(
+                frame_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)
+
+            f_timestamp_a.append([frame.timestamp_start_of_frame])
+            f_timestamp_b.append([frame.timestamp_end_of_frame])
+            f_image.append([frame_undistorted])
+
+    f.close()
+    return
+
+
+def get_vicon_poses_pyvicon(address, port, record_time, prop_mesh_markers,
+                            f_name='./data/vicon.h5'):
+
+    import pyvicon as pv
+
+    f = tables.open_file(f_name, mode='w')
+    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
+    g_props = f.create_group(f.root, 'props')
+    for prop_name in prop_mesh_markers.keys():
+        g_prop = f.create_group(g_props, prop_name)
+        f.create_earray(g_prop, 'quality', tables.atom.Float64Atom(), (0,))
+        f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
+        g_translation = f.create_group(g_prop, 'translation')
+        for marker_name in prop_mesh_markers[prop_name].keys():
+            f.create_earray(g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
+
+    client = pv.PyVicon()
+    #print('version: ' + client.__version__)
+
+    result = client.connect(f'{address}:{port}')
+    #print('connect:', result)
+
+    result = client.enable_marker_data()
+    #print('enable_marker_data:', result)
+
+    result = client.enable_segment_data()
+    #print('enable_segment_data:', result)
+
+
+    sanity_check = False
+
+    if sanity_check:
+        while True:
+            result = client.get_frame()
+            print('get_frame:', result)
+
+            if result != pv.Result.NoFrame:
+                break
+
+        prop_count = client.get_subject_count()
+        print('prop count:', prop_count)
+        assert(prop_count == len(prop_mesh_markers))
+
+        for prop_i in range(prop_count):
+            prop_name = client.get_subject_name(prop_i)
+            print('prop name:', prop_name)
+            assert(prop_name in prop_mesh_markers.keys())
+
+            marker_count = client.get_marker_count(prop_name)
+            print(' ', prop_name, 'marker count:', marker_count)
+            assert(marker_count == len(prop_mesh_markers[prop_name]))
+
+            for marker_i in range(marker_count):
+                marker_name = client.get_marker_name(prop_name, marker_i)
+                print('   ', prop_name, 'marker', marker_i, 'name:', marker_name)
+                assert(marker_name in prop_mesh_markers[prop_name].keys())
+
+
+    timestamp = int(datetime.now().timestamp() * 1000000)
+    stop_time = timestamp + record_time
+
+    while timestamp < stop_time:
+        result = client.get_frame()
+
+        if result == pv.Result.NoFrame:
+            continue
+
+        timestamp = int(datetime.now().timestamp() * 1000000)
+        f_timestamp.append([timestamp])
+
+        prop_count = client.get_subject_count()
+
+        for prop_i in range(prop_count):
+            prop_name = client.get_subject_name(prop_i)
+
+            marker_count = client.get_marker_count(prop_name)
+
+            prop_quality = client.get_subject_quality(prop_name)
+            g_props[prop_name].quality.append([prop_quality])
+
+            if prop_quality is not None:
+                root_segment = client.get_subject_root_segment_name(prop_name)
+
+                rotation = client.get_segment_global_rotation_euler_xyz(prop_name, root_segment)
+                g_props[prop_name].rotation.append([rotation])
+
+                for marker_i in range(marker_count):
+                    marker_name = client.get_marker_name(prop_name, marker_i)
+
+                    translation = client.get_marker_global_translation(prop_name, marker_name)
+                    g_props[prop_name].translation[marker_name].append([translation])
+
+            else:
+                rotation = np.full((1, 3), np.nan)
+                g_props[prop_name].rotation.append(rotation)
+
+                for marker_i in range(marker_count):
+                    marker_name = client.get_marker_name(prop_name, marker_i)
+
+                    translation = np.full((1, 3), np.nan)
+                    g_props[prop_name].translation[marker_name].append(translation)
+
+    result = client.disconnect()
+    # #print('disconnect:', result)
+
+    f.close()
+    return
+
+
+def get_vicon_poses(address, port, record_time, prop_mesh_markers,
+                    f_name='./data/vicon.h5'):
+
+    from vicon_dssdk import ViconDataStream
+
+    f = tables.open_file(f_name, mode='w')
+    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
+    g_props = f.create_group(f.root, 'props')
+    for prop_name in prop_mesh_markers.keys():
+        g_prop = f.create_group(g_props, prop_name)
+        f.create_earray(g_prop, 'quality', tables.atom.Float64Atom(), (0,))
+        f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
+        g_translation = f.create_group(g_prop, 'translation')
+        for marker_name in prop_mesh_markers[prop_name].keys():
+            f.create_earray(g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
+
+    client = ViconDataStream.Client()
+    #print('version: ' + str(client.GetVersion()))
+    client.Connect(f'{address}:{port}')
+    client.EnableMarkerData()
+    client.EnableSegmentData()
+
+
+    sanity_check = False
+
+    if sanity_check:
+        while True:
+            if client.GetFrame():
+                break
+
+        prop_names = client.GetSubjectNames()
+        prop_count = len(prop_names)
+        print('prop count:', prop_count)
+        assert(prop_count == len(prop_mesh_markers))
+
+        for prop_i in range(prop_count):
+            prop_name = prop_names[prop_i]
+            print('prop name:', prop_name)
+            assert(prop_name in prop_mesh_markers.keys())
+
+            marker_names = client.GetMarkerNames(prop_name)
+            marker_count = len(marker_names)
+            print(' ', prop_name, 'marker count:', marker_count)
+            assert(marker_count == len(prop_mesh_markers[prop_name]))
+
+            for marker_i in range(marker_count):
+                marker_name = marker_names[marker_i][0]
+                print('   ', prop_name, 'marker', marker_i, 'name:', marker_name)
+                assert(marker_name in prop_mesh_markers[prop_name].keys())
+
+
+    timestamp = int(datetime.now().timestamp() * 1000000)
+    stop_time = timestamp + record_time
+
+    while timestamp < stop_time:
+        if not client.GetFrame():
+            continue
+
+        timestamp = int(datetime.now().timestamp() * 1000000)
+        f_timestamp.append([timestamp])
+
+        prop_names = client.GetSubjectNames()
+        prop_count = len(prop_names)
+
+        for prop_i in range(prop_count):
+            prop_name = prop_names[prop_i]
+
+            marker_names = client.GetMarkerNames(prop_name)
+            marker_count = len(marker_names)
+
+            try:
+                prop_quality = client.GetObjectQuality(prop_name)
+            except ViconDataStream.DataStreamException:
+                prop_quality = None
+            g_props[prop_name].quality.append([prop_quality])
+
+            if prop_quality is not None:
+                root_segment = client.GetSubjectRootSegmentName(prop_name)
+
+                rotation = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
+                g_props[prop_name].rotation.append([rotation])
+
+                for marker_i in range(marker_count):
+                    marker_name = marker_names[marker_i][0]
+
+                    translation = client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
+                    g_props[prop_name].translation[marker_name].append([translation])
+
+            else:
+                rotation = np.full((1, 3), np.nan)
+                g_props[prop_name].rotation.append(rotation)
+
+                for marker_i in range(marker_count):
+                    marker_name = marker_names[marker_i][0]
+
+                    translation = np.full((1, 3), np.nan)
+                    g_props[prop_name].translation[marker_name].append(translation)
+
+    client.Disconnect()
+
+    f.close()
+    return
+
+
 def projection():
 
     prop_mesh = stl.mesh.Mesh.from_file('./screwdriver-decimated.stl')
 
-    vicon_address, vicon_port = '192.168.1.1', 801
-    dv_address, dv_event_port, dv_frame_port = '192.168.1.100', 36000, 36001
+    vicon_address, vicon_port = '127.0.0.1', 801
+    dv_address, dv_event_port, dv_frame_port = '127.0.0.1', 36000, 36001
 
     dv_space_coefficients_file = './calibration/dv_space_coefficients.npy'
     dv_space_constants_file = './calibration/dv_space_constants.npy'
@@ -52,182 +332,6 @@ def projection():
     }
 
 
-    def create_labelled_data_file(f_name='./data/labelled.h5'):
-        f = tables.open_file(f_name, mode='w')
-        f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-        f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
-        f_x = f.create_earray(f.root, 'x', tables.atom.UInt16Atom(), (0,))
-        f_y = f.create_earray(f.root, 'y', tables.atom.UInt16Atom(), (0,))
-        f_label = f.create_earray(f.root, 'label', tables.atom.UInt8Atom(), (0,))
-        f.close()
-
-
-    def get_dv_events(address, port, record_time, camera_matrix, distortion_coefficients,
-                      f_name='./data/dv_event.h5'):
-        f = tables.open_file(f_name, mode='w')
-        f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-        f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
-        f_x = f.create_earray(f.root, 'x', tables.atom.UInt16Atom(), (0,))
-        f_y = f.create_earray(f.root, 'y', tables.atom.UInt16Atom(), (0,))
-
-        with dv.NetworkEventInput(address=address, port=port) as event_f:
-            event = next(event_f)
-            stop_time = event.timestamp + record_time
-
-            for event in event_f:
-                if event.timestamp >= stop_time:
-                    break
-
-                # undistort event
-                event_distorted = np.array([event.x, event.y], dtype='float64')
-                event_undistorted = cv2.undistortPoints(
-                    event_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)[0, 0]
-
-                f_timestamp.append([event.timestamp])
-                f_polarity.append([event.polarity])
-                f_x.append([event_undistorted[0]])
-                f_y.append([event_undistorted[1]])
-
-        f.close()
-        return
-
-
-    def get_dv_frames(address, port, record_time, camera_matrix, distortion_coefficients,
-                      f_name='./data/dv_frame.h5'):
-        f = tables.open_file(f_name, mode='w')
-        f_timestamp_a = f.create_earray(f.root, 'timestamp_a', tables.atom.UInt64Atom(), (0,))
-        f_timestamp_b = f.create_earray(f.root, 'timestamp_b', tables.atom.UInt64Atom(), (0,))
-        f_image = f.create_earray(f.root, 'image', tables.atom.UInt8Atom(), (0, 260, 346, 3))
-
-        with dv.NetworkFrameInput(address=address, port=port) as frame_f:
-            frame = next(frame_f)
-            stop_time = frame.timestamp_end_of_frame + record_time
-
-            for frame in frame_f:
-                if frame.timestamp_end_of_frame >= stop_time:
-                    break
-
-                # undistort frame
-                frame_distorted = frame.image[:, :, :]
-                frame_undistorted = cv2.undistort(
-                    frame_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)
-
-                f_timestamp_a.append([frame.timestamp_start_of_frame])
-                f_timestamp_b.append([frame.timestamp_end_of_frame])
-                f_image.append([frame_undistorted])
-
-        f.close()
-        return
-
-
-    def get_vicon_poses(address, port, record_time, prop_mesh_markers,
-                        f_name='./data/vicon.h5'):
-        f = tables.open_file(f_name, mode='w')
-        f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-        g_props = f.create_group(f.root, 'props')
-        for prop_name in prop_mesh_markers.keys():
-            g_prop = f.create_group(g_props, prop_name)
-            f.create_earray(g_prop, 'quality', tables.atom.Float64Atom(), (0,))
-            f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
-            g_translation = f.create_group(g_prop, 'translation')
-            for marker_name in prop_mesh_markers[prop_name].keys():
-                f.create_earray(g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
-
-        sanity_check = True
-
-        client = pv.PyVicon()
-        #print('version: ' + client.__version__)
-
-        result = client.connect(f'{address}:{port}')
-        #print('connect:', result)
-
-        result = client.enable_marker_data()
-        #print('enable_marker_data:', result)
-
-        result = client.enable_segment_data()
-        #print('enable_segment_data:', result)
-
-        while True:
-            result = client.get_frame()
-            #print('get_frame:', result)
-
-            if result != pv.Result.NoFrame:
-                break
-
-
-        if sanity_check:
-            prop_count = client.get_subject_count()
-            print('prop count:', prop_count)
-            assert(prop_count == len(prop_mesh_markers))
-
-            for prop_i in range(prop_count):
-                prop_name = client.get_subject_name(prop_i)
-                print('prop name:', prop_name)
-                assert(prop_name in prop_mesh_markers.keys())
-
-                marker_count = client.get_marker_count(prop_name)
-                print(' ', prop_name, 'marker count:', marker_count)
-                assert(marker_count == len(prop_mesh_markers[prop_name]))
-
-                for marker_i in range(marker_count):
-                    marker_name = client.get_marker_name(prop_name, marker_i)
-                    print('   ', prop_name, 'marker', marker_i, 'name:', marker_name)
-                    assert(marker_name in prop_mesh_markers[prop_name].keys())
-
-
-        timestamp = int(datetime.now().timestamp() * 1000000)
-        stop_time = timestamp + record_time
-
-        while timestamp < stop_time:
-            result = client.get_frame()
-
-            if result == pv.Result.NoFrame:
-                continue
-
-            timestamp = int(datetime.now().timestamp() * 1000000)
-            f_timestamp.append([timestamp])
-
-            prop_count = client.get_subject_count()
-
-            for prop_i in range(prop_count):
-                prop_name = client.get_subject_name(prop_i)            
-
-                marker_count = client.get_marker_count(prop_name)
-
-                prop_quality = client.get_subject_quality(prop_name)
-                g_props[prop_name].quality.append([prop_quality])
-
-                if prop_quality is not None:
-                    root_segment = client.get_subject_root_segment_name(prop_name)
-
-                    rotation = client.get_segment_global_rotation_euler_xyz(prop_name, root_segment)
-                    g_props[prop_name].rotation.append([rotation])
-
-                    for marker_i in range(marker_count):
-                        marker_name = client.get_marker_name(prop_name, marker_i)
-
-                        translation = client.get_marker_global_translation(prop_name, marker_name)
-                        g_props[prop_name].translation[marker_name].append([translation])
-
-                else:
-                    rotation = np.full((1, 3), np.nan)
-                    g_props[prop_name].rotation.append(rotation)
-
-                    for marker_i in range(marker_count):
-                        marker_name = client.get_marker_name(prop_name, marker_i)
-
-                        translation = np.full((1, 3), np.nan)
-                        g_props[prop_name].translation[marker_name].append(translation)
-
-        result = client.disconnect()
-        # #print('disconnect:', result)
-
-        f.close()
-        return
-
-
-
-
     #record = True
     record = False
 
@@ -235,13 +339,15 @@ def projection():
 
     test_number = 0
 
+    #record_seconds = 3
     record_seconds = 10
     #record_seconds = 100
     record_time = record_seconds * 1000000
 
     #vicon_usec_offset = 183000
     #vicon_usec_offset = 157000
-    vicon_usec_offset = 69000000
+    #vicon_usec_offset = 69000000
+    vicon_usec_offset = 155000
 
     distinguish_dv_event_polarity = False
 
@@ -280,6 +386,11 @@ def projection():
                                        prop_mesh_markers),
                                  kwargs={'f_name': f_vicon_name}))
 
+        #processes.append(Process(target=get_vicon_poses_pyvicon,
+        #                         args=(vicon_address, vicon_port, record_time,
+        #                               prop_mesh_markers),
+        #                         kwargs={'f_name': f_vicon_name}))
+
         for p in processes:
             p.start()
 
@@ -287,6 +398,8 @@ def projection():
             p.join()
 
         print('=== end recording ===')
+
+        exit(0)
 
 
     ##################################################################

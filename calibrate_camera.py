@@ -6,7 +6,6 @@ import dv
 
 
 
-
 def calibrate():
     image_shape = (260, 346)
     cb_rows = 9
@@ -23,7 +22,7 @@ def calibrate():
     objpoints = [] # 3d point in real world space
     imgpoints = [] # 2d points in image plane.
 
-    with dv.NetworkFrameInput(address='192.168.1.100', port=36001) as f:
+    with dv.NetworkFrameInput(address='127.0.0.1', port=36001) as f:
 
         for frame in f:
             image_colour = frame.image.copy()
@@ -64,9 +63,6 @@ def calibrate():
     np.save('./calib/tvecs.npy', tvecs)
 
     return
-
-
-
 
 
 def test():
@@ -113,5 +109,5 @@ def test():
 
 
 if __name__ == '__main__':
-    #calibrate()
-    test()
+    calibrate()
+    #test()
