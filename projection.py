@@ -1,8 +1,10 @@
 
+from collections import deque
 from datetime import datetime
 from multiprocessing import Process
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import LinearRegression
+from scipy.interpolate import interp1d
 import numpy as np
 import tables
 import stl
@@ -16,7 +18,7 @@ def create_labelled_data_file(f_name='./data/labelled.h5'):
     f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
     f_x = f.create_earray(f.root, 'x', tables.atom.UInt16Atom(), (0,))
     f_y = f.create_earray(f.root, 'y', tables.atom.UInt16Atom(), (0,))
-    f_label = f.create_earray(f.root, 'label', tables.atom.UInt8Atom(), (0,))
+    f_label = f.create_earray(f.root, 'label', tables.atom.StringAtom(32), (0,))
     f.close()
 
 
@@ -53,6 +55,7 @@ def get_dv_events(address, port, record_time, camera_matrix, distortion_coeffici
 def get_dv_frames(address, port, record_time, camera_matrix, distortion_coefficients,
                   f_name='./data/dv_frame.h5'):
     f = tables.open_file(f_name, mode='w')
+    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     f_timestamp_a = f.create_earray(f.root, 'timestamp_a', tables.atom.UInt64Atom(), (0,))
     f_timestamp_b = f.create_earray(f.root, 'timestamp_b', tables.atom.UInt64Atom(), (0,))
     f_image = f.create_earray(f.root, 'image', tables.atom.UInt8Atom(), (0, 260, 346, 3))
@@ -70,6 +73,7 @@ def get_dv_frames(address, port, record_time, camera_matrix, distortion_coeffici
             frame_undistorted = cv2.undistort(
                 frame_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)
 
+            f_timestamp.append([frame.timestamp])
             f_timestamp_a.append([frame.timestamp_start_of_frame])
             f_timestamp_b.append([frame.timestamp_end_of_frame])
             f_image.append([frame_undistorted])
@@ -78,7 +82,7 @@ def get_dv_frames(address, port, record_time, camera_matrix, distortion_coeffici
     return
 
 
-def get_vicon_frame_pyvicon(address, port, record_time, prop_mesh_markers,
+def get_vicon_frame_pyvicon(address, port, record_time, props,
                             f_name='./data/vicon.h5'):
 
     import pyvicon as pv
@@ -88,12 +92,12 @@ def get_vicon_frame_pyvicon(address, port, record_time, prop_mesh_markers,
     f = tables.open_file(f_name, mode='w')
     f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     g_props = f.create_group(f.root, 'props')
-    for prop_name in prop_mesh_markers.keys():
+    for prop_name in props.keys():
         g_prop = f.create_group(g_props, prop_name)
         f.create_earray(g_prop, 'quality', tables.atom.Float64Atom(), (0,))
         f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
         g_translation = f.create_group(g_prop, 'translation')
-        for marker_name in prop_mesh_markers[prop_name].keys():
+        for marker_name in props[prop_name].keys():
             f.create_earray(g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
 
     client = pv.PyVicon()
@@ -111,21 +115,21 @@ def get_vicon_frame_pyvicon(address, port, record_time, prop_mesh_markers,
 
         prop_count = client.get_subject_count()
         print('prop count:', prop_count)
-        assert(prop_count == len(prop_mesh_markers))
+        assert(prop_count == len(props))
 
         for prop_i in range(prop_count):
             prop_name = client.get_subject_name(prop_i)
             print('prop name:', prop_name)
-            assert(prop_name in prop_mesh_markers.keys())
+            assert(prop_name in props.keys())
 
             marker_count = client.get_marker_count(prop_name)
             print(' ', prop_name, 'marker count:', marker_count)
-            assert(marker_count == len(prop_mesh_markers[prop_name]))
+            assert(marker_count == len(props[prop_name]))
 
             for marker_i in range(marker_count):
                 marker_name = client.get_marker_name(prop_name, marker_i)
                 print('   ', prop_name, 'marker', marker_i, 'name:', marker_name)
-                assert(marker_name in prop_mesh_markers[prop_name].keys())
+                assert(marker_name in props[prop_name].keys())
 
 
     # begin frame collection
@@ -179,7 +183,7 @@ def get_vicon_frame_pyvicon(address, port, record_time, prop_mesh_markers,
     return
 
 
-def get_vicon_frame(address, port, record_time, prop_mesh_markers,
+def get_vicon_frame(address, port, record_time, props,
                     f_name='./data/vicon.h5'):
 
     from vicon_dssdk import ViconDataStream
@@ -189,12 +193,12 @@ def get_vicon_frame(address, port, record_time, prop_mesh_markers,
     f = tables.open_file(f_name, mode='w')
     f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     g_props = f.create_group(f.root, 'props')
-    for prop_name in prop_mesh_markers.keys():
+    for prop_name in props.keys():
         g_prop = f.create_group(g_props, prop_name)
         f.create_earray(g_prop, 'quality', tables.atom.Float64Atom(), (0,))
         f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
         g_translation = f.create_group(g_prop, 'translation')
-        for marker_name in prop_mesh_markers[prop_name].keys():
+        for marker_name in props[prop_name].keys():
             f.create_earray(g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
 
     client = ViconDataStream.Client()
@@ -210,22 +214,22 @@ def get_vicon_frame(address, port, record_time, prop_mesh_markers,
         prop_names = client.GetSubjectNames()
         prop_count = len(prop_names)
         print('prop count:', prop_count)
-        assert(prop_count == len(prop_mesh_markers))
+        assert(prop_count == len(props))
 
         for prop_i in range(prop_count):
             prop_name = prop_names[prop_i]
             print('prop name:', prop_name)
-            assert(prop_name in prop_mesh_markers.keys())
+            assert(prop_name in props.keys())
 
             marker_names = client.GetMarkerNames(prop_name)
             marker_count = len(marker_names)
             print(' ', prop_name, 'marker count:', marker_count)
-            assert(marker_count == len(prop_mesh_markers[prop_name]))
+            assert(marker_count == len(props[prop_name]))
 
             for marker_i in range(marker_count):
                 marker_name = marker_names[marker_i][0]
                 print('   ', prop_name, 'marker', marker_i, 'name:', marker_name)
-                assert(marker_name in prop_mesh_markers[prop_name].keys())
+                assert(marker_name in props[prop_name].keys())
 
 
     # begin frame collection
@@ -295,10 +299,10 @@ def projection():
     dv_space_coefficients = np.load(dv_space_coefficients_file)
     dv_space_constants = np.load(dv_space_constants_file)
 
-    prop_mesh_markers = {}
+    props = {}
 
     # # screwdriver mesh marker coordinates
-    # prop_mesh_markers['jt_screwdriver'] = {
+    # props['jt_screwdriver'] = {
     #     'handle_1':    [ 0.0,  78.0,   13.5],
     #     'handle_2':    [ 0.0,  78.0,  -13.5],
     #     'shaft_base':  [ 5.0,  120.0,  0.0 ],
@@ -306,43 +310,54 @@ def projection():
     # }
 
     # PROTOTYPE: screwdriver mesh marker coordinates
-    prop_mesh_markers['jt_screwdriver'] = {
+    props['jt_screwdriver'] = {
         'handle_1':    [ 0.0,  78.0,   13.5],
         'handle_2':    [ 0.0,  78.0,  -13.5],
         'shaft_base':  [ 7.5,  100.0,  0.0 ], # alternate position
         'shaft_tip':   [-5.0,  164.0,  0.0 ],
     }
 
-    # Vicon wand mesh marker coordinates
-    prop_mesh_markers['jt_wand'] = {
-        'top_left':    [ 0.0,  0.0,  0.0 ],
-        'top_centre':  [ 0.0,  0.0,  0.0 ],
-        'top_right':   [ 0.0,  0.0,  0.0 ],
-        'middle':      [ 0.0,  0.0,  0.0 ],
-        'bottom':      [ 0.0,  0.0,  0.0 ],
-    }
+    # # mallet mesh marker coordinates
+    # props['jt_mallet'] = {
+    #     'shaft_base':  [ 0.0,  0.0,  0.0 ],
+    #     'shaft_tip':   [ 0.0,  0.0,  0.0 ],
+    #     'head_1':      [ 0.0,  0.0,  0.0 ],
+    #     'head_2':      [ 0.0,  0.0,  0.0 ],
+    # }
+
+    # # Vicon wand mesh marker coordinates
+    # props['jt_wand'] = {
+    #     'top_left':    [ 0.0,  0.0,  0.0 ],
+    #     'top_centre':  [ 0.0,  0.0,  0.0 ],
+    #     'top_right':   [ 0.0,  0.0,  0.0 ],
+    #     'middle':      [ 0.0,  0.0,  0.0 ],
+    #     'bottom':      [ 0.0,  0.0,  0.0 ],
+    # }
 
 
     #record = True
     record = False
 
     test_name = 'no_human'
-
-    test_number = 0
+    test_number = 7
 
     #record_seconds = 3
     record_seconds = 10
-    #record_seconds = 100
     record_time = record_seconds * 1000000
 
-    #vicon_usec_offset = 183000
-    #vicon_usec_offset = 157000
-    vicon_usec_offset = 69000000
-    #vicon_usec_offset = 155000
+    #vicon_usec_offset = -155000
+    vicon_usec_offset = -600000
 
     dv_event_distinguish_polarity = False
 
-    vicon_quality_threshold = 0.5
+    #vicon_translation_error_threshold = np.infty # mm
+    vicon_translation_error_threshold = 50.0 # mm
+    vicon_rotation_error_threshold = np.infty # degrees
+    #vicon_rotation_error_threshold = 30.0 # degrees
+    vicon_bad_frame_timeout = 50
+    #vicon_frame_buffer_length = 1000
+    #vicon_frame_buffer_length = 100
+    vicon_frame_buffer_length = 10
 
 
 
@@ -376,12 +391,12 @@ def projection():
                                  kwargs={'file_name': dv_frame_file_name}))
         processes.append(Process(target=get_vicon_frame,
                                  args=(vicon_address, vicon_port, record_time,
-                                       prop_mesh_markers),
+                                       props),
                                  kwargs={'file_name': vicon_frame_file_name}))
 
         #processes.append(Process(target=get_vicon_frame_pyvicon,
         #                         args=(vicon_address, vicon_port, record_time,
-        #                               prop_mesh_markers),
+        #                               props),
         #                         kwargs={'file_name': vicon_frame_file_name}))
 
         for p in processes:
@@ -480,69 +495,138 @@ def projection():
     green = (0, 255, 0)
     red = (0, 0, 255)
     yellow = (0, 255, 255)
-    grey = (100, 100, 100)
+    grey = (50, 50, 50)
 
-    dv_frame_shape = (260, 346, 3)
-    prop_mask = np.zeros(dv_frame_shape[:2], dtype='uint8')
-    event_pos = np.zeros(dv_frame_shape[:2], dtype='uint64')
-    event_neg = np.zeros(dv_frame_shape[:2], dtype='uint64')
-    event_image = np.zeros(dv_frame_shape, dtype='uint8')
-    frame_image = np.zeros(dv_frame_shape, dtype='uint8')
+    dv_shape = (260, 346, 3)
 
     event_image_video_file = cv2.VideoWriter(
         event_image_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
-        30, dv_frame_shape[1::-1])
+        30, dv_shape[1::-1])
     frame_image_video_file = cv2.VideoWriter(
         event_frame_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
-        30, dv_frame_shape[1::-1])
+        30, dv_shape[1::-1])
+
+    event_pos = np.zeros(dv_shape[:2], dtype='uint64')
+    event_neg = np.zeros(dv_shape[:2], dtype='uint64')
+    event_image = np.zeros(dv_shape, dtype='uint8')
+    frame_image = np.zeros(dv_shape, dtype='uint8')
 
 
-    # get initial data
-    vicon_frame_new = get_next_vicon_frame(vicon_frame_iter, usec_offset=vicon_usec_offset)
+    # initialise good Vicon frame buffer
+    vicon_timestamp_buffer = deque(maxlen=vicon_frame_buffer_length)
+    vicon_rotation_buffer = {}
+    vicon_translation_buffer = {}
+    for prop_name in props.keys():
+        vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_frame_buffer_length)
+        vicon_translation_buffer[prop_name] = {}
+        for marker_name in props[prop_name].keys():
+            vicon_translation_buffer[prop_name][marker_name] = deque(maxlen=vicon_frame_buffer_length)
+
+    # initialise prop masks
+    prop_masks = {name: np.empty(dv_shape[:2], dtype='uint8') for name in props.keys()}
+
+    # get Vicon frames
+    vicon_frame_old = get_next_vicon_frame(vicon_frame_iter, usec_offset=vicon_usec_offset)
+    vicon_frame = get_next_vicon_frame(vicon_frame_iter, usec_offset=vicon_usec_offset)
+    vicon_frame_midway = vicon_frame_old['timestamp'] / 2 + vicon_frame['timestamp'] / 2
+
+    # catch up DV events
     dv_event = get_next_dv_event(dv_event_iter)
+    while dv_event['timestamp'] < vicon_frame_midway:
+        dv_event = get_next_dv_event(dv_event_iter)
+
+    # catch up DV frames
     dv_frame = get_next_dv_frame(dv_frame_iter)
-
-
-
-
-
-
-
+    dv_frame_timestamp = dv_frame['timestamp_a'] / 2 + dv_frame['timestamp_b'] / 2
+    while dv_frame_timestamp < vicon_frame['timestamp']:
+        dv_frame = get_next_dv_frame(dv_frame_iter)
+        dv_frame_timestamp = dv_frame['timestamp_a'] / 2 + dv_frame['timestamp_b'] / 2
 
 
 
     # === MAIN LOOP ===
-    while True:
-        print('   vicon timestamp: ', vicon_frame_new['timestamp'])
-        print('DV frame timestamp: ', dv_frame['timestamp_a'])
+    done_dv_event = False
+    done_dv_frame = False
+    bad_frame_count = 0
+
+    while not done_dv_event or not done_dv_frame:
+        print('Vicon frame timestamp: ', vicon_frame['timestamp'])
         print()
 
-
-
-        # TODO: loop over all props
-        prop_name = 'jt_screwdriver'
-
-
-
-
-
-        # get next Vicon frame
         try:
-            vicon_frame = vicon_frame_new
             vicon_frame_new = get_next_vicon_frame(vicon_frame_iter, usec_offset=vicon_usec_offset)
-            vicon_frame_midway = (vicon_frame['timestamp'] + vicon_frame_new['timestamp']) / 2
-
+            vicon_frame_midway = vicon_frame['timestamp'] / 2 + vicon_frame_new['timestamp'] / 2
         except StopIteration:
             break
 
-        # clear prop mask
-        prop_mask.fill(0)
+        # check current Vicon frame
+        frame_is_good = True
+        for prop_name in props.keys():
+            rotation = vicon_frame['rotation'][prop_name]
+            rotation_old = vicon_frame_old['rotation'][prop_name]
+            if not all(np.isfinite(rotation)) or any(
+                    np.abs(rotation - rotation_old) >= vicon_rotation_error_threshold):
+                frame_is_good = False
+            for marker_name in props[prop_name].keys():
+                translation = vicon_frame['translation'][prop_name][marker_name]
+                translation_old = vicon_frame_old['translation'][prop_name][marker_name]
+                if not all(np.isfinite(translation)) or any(
+                        np.abs(translation - translation_old) >= vicon_translation_error_threshold):
+                    frame_is_good = False
 
-        # get mesh and vicon marker translations for this prop
-        x = np.array([translation for translation in prop_mesh_markers[prop_name].values()])
-        y = np.array([translation for translation in vicon_frame['translation'][prop_name].values()])
 
-        if np.isfinite(x).all() and np.isfinite(y).all():
+        # extrapolate bad Vicon frame
+        if not frame_is_good:
+            print('DEBUG: bad frame')
+            bad_frame_count += 1
+
+            if bad_frame_count < vicon_bad_frame_timeout:
+                #print('DEBUG: interpolating bad frame')
+
+                x = np.array(vicon_timestamp_buffer)
+                for prop_name in props.keys():
+                    y = np.array(vicon_rotation_buffer[prop_name])
+                    f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
+                    vicon_frame['rotation'][prop_name][:] = f(vicon_frame['timestamp'])
+                    for marker_name in props[prop_name].keys():
+                        y = np.array(vicon_translation_buffer[prop_name][marker_name])
+                        f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
+                        vicon_frame['translation'][prop_name][marker_name][:] = f(vicon_frame['timestamp'])
+
+            else: # bad frame timeout
+                print('DEBUG: bad frame timeout')
+                frame_is_good = True
+
+
+        # append good Vicon frame to buffer
+        if frame_is_good:
+            #print('DEBUG: good frame')
+            bad_frame_count = 0
+
+            # append to good Vicon frame buffers
+            timestamp = vicon_frame['timestamp']
+            vicon_timestamp_buffer.append(timestamp)
+            for prop_name in props.keys():
+                rotation = vicon_frame['rotation'][prop_name]
+                vicon_rotation_buffer[prop_name].append(rotation)
+                for marker_name in props[prop_name].keys():
+                    translation = vicon_frame['translation'][prop_name][marker_name]
+                    vicon_translation_buffer[prop_name][marker_name].append(translation)
+
+
+        # compute new prop masks
+        for prop_name in props.keys():
+
+            # clear prop mask
+            prop_masks[prop_name].fill(0)
+
+            # get mesh and Vicon marker translations for this prop
+            x = np.array(list(props[prop_name].values()))
+            y = np.array(list(vicon_frame['translation'][prop_name].values()))
+
+            if not np.isfinite(y).all():
+                continue
+
             # estimate Vicon space transformation
             regressor = MultiOutputRegressor(
                 estimator=LinearRegression(),
@@ -559,19 +643,51 @@ def projection():
             dv_space_p_int = np.rint(dv_space_p).astype('int32')
 
             # compute prop mask
-            cv2.fillPoly(prop_mask, dv_space_p_int, 255)
+            cv2.fillPoly(prop_masks[prop_name], dv_space_p_int, 255)
             prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
-            prop_mask = cv2.dilate(prop_mask, prop_mask_dilation_kernel)
+            prop_masks[prop_name] = cv2.dilate(prop_masks[prop_name], prop_mask_dilation_kernel)
 
 
-        # get next DV events
-        event_pos.fill(0)
-        event_neg.fill(0)
 
-        try:
+        # process DV frames
+        if not done_dv_frame:
+
+            if vicon_frame['timestamp'] >= dv_frame_timestamp:
+
+                # mask DV frame image
+                frame_image[:, :, :] = dv_frame['image']
+                for prop_name in props.keys():
+                    prop_mask = prop_masks[prop_name].astype('bool')
+                    frame_image[prop_mask, :] = blue
+
+                # write and show DV frame image
+                frame_image_video_file.write(frame_image)
+                cv2.imshow('frame image', frame_image)
+                k = cv2.waitKey(1)
+                if k == ord('q'):
+                    cv2.destroyWindow('frame image')
+                    done_dv_frame = True
+
+                while dv_frame_timestamp < vicon_frame['timestamp']:
+                    try:
+                        dv_frame = get_next_dv_frame(dv_frame_iter)
+                        dv_frame_timestamp = dv_frame['timestamp_a'] / 2 + dv_frame['timestamp_b'] / 2
+                    except StopIteration:
+                        done_dv_frame = True
+                        break
+
+
+
+        # process DV events
+        if not done_dv_event:
+            event_pos.fill(0)
+            event_neg.fill(0)
+
             while dv_event['timestamp'] < vicon_frame_midway:
-                bounded_x = 0 <= dv_event['x'] < dv_frame_shape[1]
-                bounded_y = 0 <= dv_event['y'] < dv_frame_shape[0]
+
+                # check DV event is in frame
+                bounded_x = 0 <= dv_event['x'] < dv_shape[1]
+                bounded_y = 0 <= dv_event['y'] < dv_shape[0]
 
                 if bounded_x and bounded_y:
                     if dv_event['polarity']:
@@ -579,9 +695,14 @@ def projection():
                     else:
                         event_neg[dv_event['y'], dv_event['x']] += 1
 
-                    label = 0
-                    if prop_mask[dv_event['y'], dv_event['x']]:
-                        label = 1
+                    label = ''
+                    for prop_name in props.keys():
+                        prop_mask = prop_masks[prop_name].astype('bool')
+                        if prop_mask[dv_event['y'], dv_event['x']]:
+                            if label:
+                                label = 'UNKNOWN'
+                                break
+                            label = prop_name
 
                     labelled_iter['timestamp'].append([dv_event['timestamp']])
                     labelled_iter['polarity'].append([dv_event['polarity']])
@@ -589,52 +710,43 @@ def projection():
                     labelled_iter['y'].append([dv_event['y']])
                     labelled_iter['label'].append([label])
 
-                dv_event = get_next_dv_event(dv_event_iter)
-
-        except StopIteration:
-            break
-
-        # fill DV event image with events, then mask it
-        event_image.fill(0)
-        #event_image[prop_mask.astype('bool')] = grey # show prop mask?
-        if dv_event_distinguish_polarity:
-            event_mask_neg = event_neg > event_pos
-            event_image[(event_mask_neg & ~prop_mask.astype('bool'))] = green
-            event_image[(event_mask_neg & prop_mask.astype('bool'))] = blue
-            event_mask_pos = event_pos > event_neg
-            event_image[(event_mask_pos & ~prop_mask.astype('bool'))] = red
-            event_image[(event_mask_pos & prop_mask.astype('bool'))] = yellow
-        else:
-            event_mask = event_neg.astype('bool') | event_pos.astype('bool')
-            event_image[(event_mask & ~prop_mask.astype('bool'))] = green
-            event_image[(event_mask & prop_mask.astype('bool'))] = red
-
-        # write and show DV event image
-        event_image_video_file.write(event_image)
-        # cv2.imshow('event image', event_image)
-        # k = cv2.waitKey(1)
-        # if k == ord('q'):
-        #     break
+                try:
+                    dv_event = get_next_dv_event(dv_event_iter)
+                except StopIteration:
+                    done_dv_event = True
+                    break
 
 
-        # get next DV frame
-        try:
-            while dv_frame['timestamp_b'] < vicon_frame['timestamp']:
-                dv_frame = get_next_dv_frame(dv_frame_iter)
+            # fill DV event image with events, then mask it
+            event_image.fill(0)
+            for prop_name in props.keys():
+                prop_mask = prop_masks[prop_name].astype('bool')
+                event_image[prop_mask] = grey # show prop mask?
+                if dv_event_distinguish_polarity:
+                    event_mask_neg = event_neg > event_pos
+                    event_image[(event_mask_neg & ~prop_mask)] = green
+                    event_image[(event_mask_neg & prop_mask)] = blue
+                    event_mask_pos = event_pos > event_neg
+                    event_image[(event_mask_pos & ~prop_mask)] = red
+                    event_image[(event_mask_pos & prop_mask)] = yellow
+                else:
+                    event_mask = event_neg.astype('bool') | event_pos.astype('bool')
+                    event_image[(event_mask & ~prop_mask)] = green
+                    event_image[(event_mask & prop_mask)] = red
 
-        except StopIteration:
-            break
+            # write and show DV event image
+            event_image_video_file.write(event_image)
+            cv2.imshow('event image', event_image)
+            k = cv2.waitKey(1)
+            if k == ord('q'):
+                cv2.destroyWindow('event image')
+                done_dv_event = True
 
-        # get DV frame image, then mask it
-        frame_image[:, :, :] = dv_frame['image']
-        frame_image[prop_mask.astype('bool'), :] = blue
 
-        # write and show DV frame image
-        frame_image_video_file.write(frame_image)
-        # cv2.imshow('frame image', frame_image)
-        # k = cv2.waitKey(1)
-        # if k == ord('q'):
-        #     break
+
+        vicon_frame_old = vicon_frame
+        vicon_frame = vicon_frame_new
+
 
 
     event_image_video_file.release()
