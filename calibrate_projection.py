@@ -412,7 +412,7 @@ def calibrate():
     reuse = True
     reuse_vicon = reuse
     reuse_dv = reuse
-    anneal= True
+    anneal= False
     
     windows_vicon_sdk = False
 
@@ -461,8 +461,6 @@ def calibrate():
             accept = input('accept epoch? (y/n): ')
             if accept == 'y':
                 i_epoch += 1
-
-
 
 
     def err_fun(m, vicon_p, dv_p):
@@ -554,7 +552,7 @@ def calibrate():
         print('DV space transform error: ', err_fun2(m, x, y))
     else:
         for i in range(10):
-            minimize(err_fun2, m, args=(x, y), method='nelder-mead', options={'disp': True})
+            result= minimize(err_fun2, m, args=(x, y), method='nelder-mead', options={'disp': True})
             m = result['x']
             print('DV space transform error: ', err_fun2(m, x, y))
 
