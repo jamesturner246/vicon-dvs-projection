@@ -5,7 +5,7 @@ import cv2
 import dv
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import minimize
+from scipy.optimize import minimize, basinhopping
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
@@ -406,14 +406,15 @@ def calibrate():
 
     n_epoch = 3
 
-    debug = False
-    test = True
+    debug = True
+    test = False
 
-    reuse = False
+    reuse = True
     reuse_vicon = reuse
     reuse_dv = reuse
-
-    windows_vicon_sdk = True
+    anneal= True
+    
+    windows_vicon_sdk = False
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -483,7 +484,55 @@ def calibrate():
 
         return np.sqrt(error)
 
+    
+    def vicon_to_dv(m,v):
+        output= vicon_to_camera_centric(m,v)
+        # now project into the focal plane - m[6] is the focal length in mm
+        output *= (1.0 / output[2])*12  # focal length 12 mm??
+        # first rescale/ convert to pixel units - rescale by 100 for better fitting
+        output[0]/= 1.8e-2   # 18 micrometer/pixel = 1.8e-2 mm/pixel
+        output[1]/= 1.8e-2
+        return output[:2]
 
+    def vicon_to_camera_centric(m,v):
+        M= np.array([[1, 0, 0],
+                     [0, np.cos(m[0]), -np.sin(m[0])],
+                     [0, np.sin(m[0]), np.cos(m[0])]])
+        M= np.dot(np.array([[np.cos(m[1]), 0, np.sin(m[1])],
+                     [0, 1, 0],
+                            [-np.sin(m[1]), 0, np.cos(m[1])]]), M)
+        M= np.dot(np.array([[np.cos(m[2]), -np.sin(m[2]), 0],
+                            [np.sin(m[2]), np.cos(m[2]), 0],
+                            [0, 0, 1]]), M)
+        # apply the rotation to get into the camera orientation frame
+        output = np.dot(M,v)
+        # add the translation (using meters for a better scale of fitting)
+        output += m[3:6]*1000
+        return output
+    
+    def err_fun2(m, vicon_p, dv_p):
+        # the meaning of m is as follows:
+        # 0-2 Euler angles of transform into camera oriented space
+        # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
+        # 6-7 scale factors for mm to pixel transform for x and y
+
+        # M is the rotation matrix defined by the Euler angles:
+        #vicon_p = np.concatenate([vicon_p, np.ones((vicon_p.shape[0], 1))], axis=1)
+        #dv_p = np.concatenate([dv_p, np.ones((dv_p.shape[0], 1))], axis=1)
+        assert dv_p.shape[0] == vicon_p.shape[0]
+
+        #m = np.reshape(np.hstack([m, [1.0]]), (4, 3))
+
+        error = 0.0
+        for v, d in zip(vicon_p, dv_p):
+            output= vicon_to_dv(m, v)
+            difference = output - d
+            error += np.dot(difference, difference)
+
+        return np.sqrt(error)
+
+
+    
 
 
     # Vicon to DV transformation
@@ -495,31 +544,50 @@ def calibrate():
     x = np.vstack(vicon_wand_coordinates)
     y = np.vstack(dv_wand_coordinates)
     #m = np.zeros(11)
-    m = np.empty(11)
-    m[:9] = dv_space_coefficients.flatten()
-    m[9:] = dv_space_constants[:2]
-
-    for i in range(10):
-        result = minimize(err_fun, m, args=(x, y), method='nelder-mead', options={'disp': True})
+    m = np.empty(6)
+    m[:3] = np.array([-1.5, -0.2, 3.1])   #dv_space_coefficients.flatten()
+    m[3:6] = np.array([3, 3.4, 7.6])  #dv_space_constants[:2]
+    #m[6]= 6.0
+    if anneal:
+        result = basinhopping(err_fun2, m, niter= 100, T= 0.01, stepsize= 0.1, minimizer_kwargs={'method': "nelder-mead", 'args': (x, y)}, disp=True)
         m = result['x']
-        print('DV space transform error: ', err_fun(m, x, y))
+        print('DV space transform error: ', err_fun2(m, x, y))
+    else:
+        for i in range(10):
+            minimize(err_fun2, m, args=(x, y), method='nelder-mead', options={'disp': True})
+            m = result['x']
+            print('DV space transform error: ', err_fun2(m, x, y))
 
-    m = np.hstack([result['x'], [1.0]])
-    m = np.reshape(m, (4, 3))
+    print("Euler angles: {}".format(m[:3]))
+    print("Translation: {}".format(m[3:6]))
+    #print("Scaling: {}".format(m[6]))
 
-    dv_space_coefficients = m[:3, :]
-    dv_space_constants = m[3, :]
+    plt.figure()
+    plt.scatter(y[:,0],y[:,1])
+    z= np.zeros(y.shape)
+    for i in range(x.shape[0]):
+        z[i,:]= vicon_to_dv(m, x[i,:])
+    plt.scatter(z[:,0],z[:,1])
+    plt.xlim([ 0, 346])
+    plt.ylim([ 0, 260])
+    plt.show()
 
-    dv_space_coefficients_file = './calibration/dv_space_coefficients.npy'
-    dv_space_constants_file = './calibration/dv_space_constants.npy'
-    np.save(dv_space_coefficients_file, dv_space_coefficients)
-    np.save(dv_space_constants_file, dv_space_constants)
+    #m = np.hstack([result['x'], [1.0]])
+    #m = np.reshape(m, (4, 3))
 
-    print('DV space coefficients')
-    print(dv_space_coefficients)
-    print('DV space constants')
-    print(dv_space_constants)
-    print()
+    #dv_space_coefficients = m[:3, :]
+    #dv_space_constants = m[3, :]
+
+    #dv_space_coefficients_file = './calibration/dv_space_coefficients.npy'
+    #dv_space_constants_file = './calibration/dv_space_constants.npy'
+    #np.save(dv_space_coefficients_file, dv_space_coefficients)
+    #np.save(dv_space_constants_file, dv_space_constants)
+
+    #print('DV space coefficients')
+    #print(dv_space_coefficients)
+    #print('DV space constants')
+    #print(dv_space_constants)
+    #print()
 
 
     if test:
