@@ -104,7 +104,7 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
     print('Vicon coordinates')
 
     marker_count = len(marker_names)
-    marker_coordinates_file = f'./calibration-temp/vicon_coordinates_{i_epoch}.npy'
+    marker_coordinates_file = f'./calibration/vicon_coordinates_{i_epoch}.npy'
     mean_coordinates = np.empty((marker_count, 3), dtype='float64')
     median_coordinates = np.empty((marker_count, 3), dtype='float64')
 
@@ -192,7 +192,7 @@ def get_vicon_coordinates_pyvicon(i_epoch, address, port, prop_name, marker_name
     print('Vicon coordinates')
 
     n_marker = len(marker_names)
-    marker_coordinates_file = f'./calibration-temp/vicon_coordinates_{i_epoch}.npy'
+    marker_coordinates_file = f'./calibration/vicon_coordinates_{i_epoch}.npy'
     mean_coordinates = np.empty((n_marker, 3), dtype='float64')
     median_coordinates = np.empty((n_marker, 3), dtype='float64')
 
@@ -273,7 +273,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
     print('DV coordinates')
 
     n_marker = len(marker_names)
-    coordinates_file = f'./calibration-temp/dv_coordinates_{i_epoch}.npy'
+    coordinates_file = f'./calibration/dv_coordinates_{i_epoch}.npy'
 
     if reuse:
         coordinates = np.load(coordinates_file)
