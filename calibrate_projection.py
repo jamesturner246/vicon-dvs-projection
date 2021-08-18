@@ -404,7 +404,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
 def calibrate():
 
-    n_epoch = 3
+    n_epoch = 20
 
     debug = True
     test = False
@@ -442,8 +442,9 @@ def calibrate():
 
     i_epoch = 0
     while i_epoch < n_epoch:
-        print(f'calibration epoch {i_epoch}')
-        input('relocate prop and press enter...')
+        if not (reuse_vicon and reuse_dv):
+            print(f'calibration epoch {i_epoch}')
+            input('relocate prop and press enter...')
 
         vicon_wand_coordinates[i_epoch, :, :] = get_vicon_coordinates(
             i_epoch, vicon_address, vicon_port, prop_name, marker_names,
@@ -456,11 +457,14 @@ def calibrate():
             n_event=dv_n_event, frame_shape=dv_frame_shape,
             reuse=reuse_dv, debug=debug)
 
-        accept = ''
-        while accept != 'y' and accept != 'n':
-            accept = input('accept epoch? (y/n): ')
-            if accept == 'y':
-                i_epoch += 1
+        if not (reuse_vicon and reuse_dv):
+            accept = ''
+            while accept != 'y' and accept != 'n':
+                accept = input('accept epoch? (y/n): ')
+                if accept == 'y':
+                    i_epoch += 1
+        else:
+            i_epoch += 1
 
 
     def err_fun(m, vicon_p, dv_p):
@@ -470,8 +474,6 @@ def calibrate():
 
         m = np.hstack([m, [1.0]])
         m = np.reshape(m, (4, 3))
-
-        #m = np.reshape(np.hstack([m, [1.0]]), (4, 3))
 
         error = 0.0
         for v, d in zip(vicon_p, dv_p):
@@ -484,43 +486,37 @@ def calibrate():
 
     
     def vicon_to_dv(m,v):
-        output= vicon_to_camera_centric(m,v)
-        # now project into the focal plane - m[6] is the focal length in mm
-        output *= (1.0 / output[2])*12  # focal length 12 mm??
-        # first rescale/ convert to pixel units - rescale by 100 for better fitting
-        output[0]/= 1.8e-2   # 18 micrometer/pixel = 1.8e-2 mm/pixel
-        output[1]/= 1.8e-2
-        return output[:2]
+        z= vicon_to_camera_centric(m,v)
+        z *= (1.0 / z[2])*4  # focal length 4 mm
+        z= z[:2]
+        z/= 1.8e-2   # 18 micrometer/pixel = 1.8e-2 mm/pixel
+        z[0]*= m[6]  # allow for some rescaling of x due to the camera  undistortion method
+        z+= [173, 130]  # add the origin offset from image centre to top left corner explicitly
+        return z
 
     def vicon_to_camera_centric(m,v):
-        M= np.array([[1, 0, 0],
-                     [0, np.cos(m[0]), -np.sin(m[0])],
-                     [0, np.sin(m[0]), np.cos(m[0])]])
-        M= np.dot(np.array([[np.cos(m[1]), 0, np.sin(m[1])],
-                     [0, 1, 0],
-                            [-np.sin(m[1]), 0, np.cos(m[1])]]), M)
+        # M is the rotation matrix defined by the Euler angles:
+        M= np.array([[np.cos(m[0]), -np.sin(m[0]), 0],
+                            [np.sin(m[0]), np.cos(m[0]), 0],
+                            [0, 0, 1]])
+        M= np.dot(np.array([[1, 0, 0],
+                     [0, np.cos(m[1]), -np.sin(m[1])],
+                            [0, np.sin(m[1]), np.cos(m[1])]]),M)
         M= np.dot(np.array([[np.cos(m[2]), -np.sin(m[2]), 0],
                             [np.sin(m[2]), np.cos(m[2]), 0],
                             [0, 0, 1]]), M)
-        # apply the rotation to get into the camera orientation frame
-        output = np.dot(M,v)
-        # add the translation (using meters for a better scale of fitting)
-        output += m[3:6]*1000
-        return output
+        
+        z = np.dot(M,v) # apply the rotation to get into the camera orientation frame
+        z += m[3:6]*10  # add the translation (using cm for a better scale of fitting)
+        return z
     
     def err_fun2(m, vicon_p, dv_p):
         # the meaning of m is as follows:
-        # 0-2 Euler angles of transform into camera oriented space
+        # 0-2 Euler angles of transform into camera oriented space 
         # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
-        # 6-7 scale factors for mm to pixel transform for x and y
+        # 6 scale factor for stretch in x-direction due to camera calibration/undistortion
 
-        # M is the rotation matrix defined by the Euler angles:
-        #vicon_p = np.concatenate([vicon_p, np.ones((vicon_p.shape[0], 1))], axis=1)
-        #dv_p = np.concatenate([dv_p, np.ones((dv_p.shape[0], 1))], axis=1)
         assert dv_p.shape[0] == vicon_p.shape[0]
-
-        #m = np.reshape(np.hstack([m, [1.0]]), (4, 3))
-
         error = 0.0
         for v, d in zip(vicon_p, dv_p):
             output= vicon_to_dv(m, v)
@@ -530,69 +526,53 @@ def calibrate():
         return np.sqrt(error)
 
 
-    
-
-
     # Vicon to DV transformation
-    dv_space_coefficients_file = './calibration/bootstrap_dv_space_coefficients.npy'
-    dv_space_constants_file = './calibration/bootstrap_dv_space_constants.npy'
-    dv_space_coefficients = np.load(dv_space_coefficients_file)
-    dv_space_constants = np.load(dv_space_constants_file)
 
     x = np.vstack(vicon_wand_coordinates)
     y = np.vstack(dv_wand_coordinates)
-    #m = np.zeros(11)
-    m = np.empty(6)
-    m[:3] = np.array([-1.5, -0.2, 3.1])   #dv_space_coefficients.flatten()
-    m[3:6] = np.array([3, 3.4, 7.6])  #dv_space_constants[:2]
-    #m[6]= 6.0
+    m = np.empty(7)
+
+    m[:3] = np.array([3.14, 1.6, 0.0])  # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
+    m[3:6] = np.array([22, 93, 231])  # initial guess for translation from pinhole to vicon origin
+    m[6]= 1.05  # initial guess for the x-stretching from camera undistortion
+    print(f'Original guess has error: {err_fun2(m,x,y)}')
+
     if anneal:
-        result = basinhopping(err_fun2, m, niter= 100, T= 0.01, stepsize= 0.1, minimizer_kwargs={'method': "nelder-mead", 'args': (x, y)}, disp=True)
+        result = basinhopping(err_fun2, m, niter= 50, T= 0.5, stepsize= 1.0, minimizer_kwargs={'method': "nelder-mead", 'args': (x, y)}, disp=True)
         m = result['x']
         print('DV space transform error: ', err_fun2(m, x, y))
     else:
-        for i in range(10):
-            result= minimize(err_fun2, m, args=(x, y), method='nelder-mead', options={'disp': True})
-            m = result['x']
-            print('DV space transform error: ', err_fun2(m, x, y))
+        result= minimize(err_fun2, m, args=(x, y), method='nelder-mead', options={'disp': True,'maxiter': 50000,'maxfev':100000,'xatol':1e-10,'fatol':1e-10})
+        m = result['x']
+        print('DV space transform error: ', err_fun2(m, x, y))
 
     print("Euler angles: {}".format(m[:3]))
     print("Translation: {}".format(m[3:6]))
-    #print("Scaling: {}".format(m[6]))
+    print("x rescale: {}".format(m[6:]))
 
     plt.figure()
-    plt.scatter(y[:,0],y[:,1])
+    for i in range(y.shape[0]//5):
+        plt.scatter(y[5*i:5*(i+1),0],y[5*i:5*(i+1),1])
     z= np.zeros(y.shape)
     for i in range(x.shape[0]):
         z[i,:]= vicon_to_dv(m, x[i,:])
-    plt.scatter(z[:,0],z[:,1])
+    for i in range(z.shape[0]//5):
+        plt.scatter(z[5*i:5*(i+1),0],z[5*i:5*(i+1),1],marker='x')
+    ax= np.array([[[ 0, 0, 0], [1000, 0, 0]],
+         [[ 0, 0, 0], [0, 1000, 0]],
+         [[ 0, 0, 0], [0, 0, 1000]]])
+    ax2= np.empty((3,2,2))
+    for i in range(3):
+        for j in range(2):
+            ax2[i,j,:]= vicon_to_dv(m,ax[i,j,:])
+    for i in range(3):
+        plt.plot(ax2[i,:,0].flatten(),ax2[i,:,1].flatten())
     plt.xlim([ 0, 346])
     plt.ylim([ 0, 260])
+    plt.gca().invert_yaxis()
     plt.show()
 
-    #m = np.hstack([result['x'], [1.0]])
-    #m = np.reshape(m, (4, 3))
-
-    #dv_space_coefficients = m[:3, :]
-    #dv_space_constants = m[3, :]
-
-    #dv_space_coefficients_file = './calibration/dv_space_coefficients.npy'
-    #dv_space_constants_file = './calibration/dv_space_constants.npy'
-    #np.save(dv_space_coefficients_file, dv_space_coefficients)
-    #np.save(dv_space_constants_file, dv_space_constants)
-
-    #print('DV space coefficients')
-    #print(dv_space_coefficients)
-    #print('DV space constants')
-    #print(dv_space_constants)
-    #print()
-
-
     if test:
-
-
-
-
 
         if windows_vicon_sdk: # OFFICIAL WINDOWS VICON SDK
 
