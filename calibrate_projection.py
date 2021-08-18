@@ -487,25 +487,28 @@ def calibrate():
     
     def vicon_to_dv(m,v):
         z= vicon_to_camera_centric(m,v)
-        z *= (1.0 / z[2])*4  # focal length 4 mm
+        z *= (1.0 / z[2])*4*m[6]  # focal length 4 mm
         z= z[:2]
         z/= 1.8e-2   # 18 micrometer/pixel = 1.8e-2 mm/pixel
-        z[0]*= m[6]  # allow for some rescaling of x due to the camera  undistortion method
+        z[0]*= m[7]  # allow for some rescaling of x due to the camera  undistortion method
         z+= [173, 130]  # add the origin offset from image centre to top left corner explicitly
         return z
 
-    def vicon_to_camera_centric(m,v):
-        # M is the rotation matrix defined by the Euler angles:
+    def the_matrix(m):
         M= np.array([[np.cos(m[0]), -np.sin(m[0]), 0],
-                            [np.sin(m[0]), np.cos(m[0]), 0],
-                            [0, 0, 1]])
+                     [np.sin(m[0]), np.cos(m[0]), 0],
+                     [0, 0, 1]])
         M= np.dot(np.array([[1, 0, 0],
-                     [0, np.cos(m[1]), -np.sin(m[1])],
+                            [0, np.cos(m[1]), -np.sin(m[1])],
                             [0, np.sin(m[1]), np.cos(m[1])]]),M)
         M= np.dot(np.array([[np.cos(m[2]), -np.sin(m[2]), 0],
                             [np.sin(m[2]), np.cos(m[2]), 0],
                             [0, 0, 1]]), M)
-        
+        return M
+    
+    def vicon_to_camera_centric(m,v):
+        # M is the rotation matrix defined by the Euler angles:
+        M= the_matrix(m)
         z = np.dot(M,v) # apply the rotation to get into the camera orientation frame
         z += m[3:6]*10  # add the translation (using cm for a better scale of fitting)
         return z
@@ -530,11 +533,11 @@ def calibrate():
 
     x = np.vstack(vicon_wand_coordinates)
     y = np.vstack(dv_wand_coordinates)
-    m = np.empty(7)
+    m = np.empty(8)
 
     m[:3] = np.array([3.14, 1.6, 0.0])  # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
     m[3:6] = np.array([22, 93, 231])  # initial guess for translation from pinhole to vicon origin
-    m[6]= 1.05  # initial guess for the x-stretching from camera undistortion
+    m[6:8]= [ 1.0, 1.0 ]  # initial guess for the deviation of focal length and x-stretching from camera undistortion
     print(f'Original guess has error: {err_fun2(m,x,y)}')
 
     if anneal:
@@ -548,8 +551,8 @@ def calibrate():
 
     print("Euler angles: {}".format(m[:3]))
     print("Translation: {}".format(m[3:6]))
-    print("x rescale: {}".format(m[6:]))
-
+    print("focal length and x rescales: {}".format(m[6:]))
+    print("The matrix: {}".format(the_matrix(m)))
     plt.figure()
     for i in range(y.shape[0]//5):
         plt.scatter(y[5*i:5*(i+1),0],y[5*i:5*(i+1),1])
