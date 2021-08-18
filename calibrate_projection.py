@@ -404,12 +404,12 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
 def calibrate():
 
-    n_epoch = 3
+    n_epoch = 20
 
     debug = False
     test = True
 
-    reuse = False
+    reuse  = False
     reuse_vicon = reuse
     reuse_dv = reuse
 
@@ -441,8 +441,9 @@ def calibrate():
 
     i_epoch = 0
     while i_epoch < n_epoch:
-        print(f'calibration epoch {i_epoch}')
-        input('relocate prop and press enter...')
+        if not (reuse_vicon and reuse_dv):
+            print(f'calibration epoch {i_epoch}')
+            input('relocate prop and press enter...')
 
         vicon_wand_coordinates[i_epoch, :, :] = get_vicon_coordinates(
             i_epoch, vicon_address, vicon_port, prop_name, marker_names,
@@ -455,29 +456,36 @@ def calibrate():
             n_event=dv_n_event, frame_shape=dv_frame_shape,
             reuse=reuse_dv, debug=debug)
 
-        accept = ''
-        while accept != 'y' and accept != 'n':
-            accept = input('accept epoch? (y/n): ')
-            if accept == 'y':
-                i_epoch += 1
+        if not (reuse_vicon and reuse_dv):
+            accept = ''
+            while accept != 'y' and accept != 'n':
+                accept = input('accept epoch? (y/n): ')
+                if accept == 'y':
+                    i_epoch += 1
+        else:
+            i_epoch += 1
 
 
+    def vicon_to_dv(m, v):
+        z= vicon_to_camera_centric(m,v)
+        z *= (1.0 / z[2])*4  # focal length 4 mm
+        z= z[:2]
+        z/= 1.8e-2   # 18 micrometer/pixel = 1.8e-2 mm/pixel
+        z+= [173, 130]  # add the origin offset from image centre to top left corner explicitly
+        return z
 
+    def vicon_to_camera_centric(m, v):
+        M= np.reshape(m[:9],(3,3))
+        z = np.dot(M,v) # apply the rotation to get into the camera orientation frame
+        z += m[9:12]*10  # add the translation (using cm for a better scale of fitting)
+        return z
 
     def err_fun(m, vicon_p, dv_p):
-        vicon_p = np.concatenate([vicon_p, np.ones((vicon_p.shape[0], 1))], axis=1)
-        dv_p = np.concatenate([dv_p, np.ones((dv_p.shape[0], 1))], axis=1)
         assert dv_p.shape[0] == vicon_p.shape[0]
-
-        m = np.hstack([m, [1.0]])
-        m = np.reshape(m, (4, 3))
-
-        #m = np.reshape(np.hstack([m, [1.0]]), (4, 3))
 
         error = 0.0
         for v, d in zip(vicon_p, dv_p):
-            output = np.dot(v, m)
-            output *= (1.0 / output[2])
+            output = vicon_to_dv(m, v)
             difference = output - d
             error += np.dot(difference, difference)
 
@@ -494,21 +502,19 @@ def calibrate():
 
     x = np.vstack(vicon_wand_coordinates)
     y = np.vstack(dv_wand_coordinates)
-    #m = np.zeros(11)
-    m = np.empty(11)
+    m = np.empty(12)
     m[:9] = dv_space_coefficients.flatten()
-    m[9:] = dv_space_constants[:2]
+    m[9:] = dv_space_constants
 
-    for i in range(10):
+    for i in range(5):
         result = minimize(err_fun, m, args=(x, y), method='nelder-mead', options={'disp': True})
         m = result['x']
         print('DV space transform error: ', err_fun(m, x, y))
 
-    m = np.hstack([result['x'], [1.0]])
-    m = np.reshape(m, (4, 3))
-
-    dv_space_coefficients = m[:3, :]
-    dv_space_constants = m[3, :]
+    m = result['x']
+ 
+    dv_space_coefficients = np.reshape(m[:9], (3, 3))
+    dv_space_constants = m[9:]
 
     dv_space_coefficients_file = './calibration/dv_space_coefficients.npy'
     dv_space_constants_file = './calibration/dv_space_constants.npy'
@@ -520,6 +526,29 @@ def calibrate():
     print('DV space constants')
     print(dv_space_constants)
     print()
+
+    plt.figure()
+    for i in range(y.shape[0]//5):
+        plt.scatter(y[5*i:5*(i+1),0],y[5*i:5*(i+1),1])
+    z= np.zeros(y.shape)
+    for i in range(x.shape[0]):
+        z[i,:]= vicon_to_dv(m, x[i,:])
+    for i in range(z.shape[0]//5):
+        plt.scatter(z[5*i:5*(i+1),0],z[5*i:5*(i+1),1],marker='x')
+    ax= np.array([[[ 0, 0, 0], [1000, 0, 0]],
+         [[ 0, 0, 0], [0, 1000, 0]],
+         [[ 0, 0, 0], [0, 0, 1000]]])
+    ax2= np.empty((3,2,2))
+    for i in range(3):
+        for j in range(2):
+            ax2[i,j,:]= vicon_to_dv(m,ax[i,j,:])
+    for i in range(3):
+        plt.plot(ax2[i,:,0].flatten(),ax2[i,:,1].flatten())
+    plt.xlim([ 0, 346])
+    plt.ylim([ 0, 260])
+    plt.gca().invert_yaxis()
+    plt.show()
+
 
 
     if test:
