@@ -105,19 +105,19 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
 
     print('Vicon coordinates')
 
-    marker_count = len(marker_names)
+    marker_translation_file = f'{path}/vicon_marker_translation_{i_epoch}.npy'
     coordinates_file = f'{path}/vicon_coordinates_{i_epoch}.npy'
-    coordinates = np.empty((marker_count, 3), dtype='float64')
 
+    marker_count = len(marker_names)
+
+
+    # === COLLECT RAW DATA ===
     if reuse:
-        coordinates = np.load(coordinates_file)
+        marker_translation = np.load(marker_translation_file)
 
     else:
-        coordinates = np.empty((marker_count, 3), dtype='float64')
-
         from vicon_dssdk import ViconDataStream
 
-        marker_translation_file = f'{path}/vicon_marker_translation_{i_epoch}.npy'
         marker_translation = np.empty((n_frame, marker_count, 3), dtype='float64')
 
         client = ViconDataStream.Client()
@@ -154,16 +154,18 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
 
             time.sleep(t_frame)
 
-        progress.close()
-        
+        progress.close()        
         client.Disconnect()
 
-        # set coordinates to median marker translation
-        coordinates[:, :] = np.median(marker_translation, 0)
-
-        # save data
-        np.save(coordinates_file, coordinates)
+        # save raw data
         np.save(marker_translation_file, marker_translation)
+
+
+    # == PROCESS RAW DATA ===
+    coordinates = np.median(marker_translation, 0)
+
+    # save processed data
+    np.save(coordinates_file, coordinates)
 
     # print Vicon coordinates
     for i in range(marker_count):
@@ -180,34 +182,27 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
     print('DV coordinates')
 
-    marker_count = len(marker_names)
+    event_t_file = f'{path}/dv_event_t_{i_epoch}.npy'
+    event_p_file = f'{path}/dv_event_p_{i_epoch}.npy'
+    event_xy_distorted_file = f'{path}/dv_event_xy_distorted_{i_epoch}.npy'
+    event_xy_undistorted_file = f'{path}/dv_event_xy_undistorted_{i_epoch}.npy'
     coordinates_file = f'{path}/dv_coordinates_{i_epoch}.npy'
 
+    marker_count = len(marker_names)
+    erode_dv_kernel = np.ones((3, 3), 'uint8')
+    dilate_dv_kernel = np.ones((10, 10), 'uint8')
+
+
+    # === COLLECT RAW DATA ===
     if reuse:
-        coordinates = np.load(coordinates_file)
+        event_t = np.load(event_t_file)
+        event_p = np.load(event_p_file)
+        event_xy_distorted = np.load(event_xy_distorted_file)
 
     else:
-        coordinates = np.empty((marker_count, 2), dtype='float64')
-
-        if debug:
-            coordinates_int = np.empty((len(marker_names), 2), dtype='int32')
-            coordinates_image = np.empty(frame_shape[:2], dtype='uint8')
-
-        event_image = np.zeros(frame_shape[:2], dtype='int64')
-        erode_dv_kernel = np.ones((3, 3), 'uint8')
-        dilate_dv_kernel = np.ones((10, 10), 'uint8')
-
-        event_t_file = f'{path}/dv_event_t_{i_epoch}.npy'
         event_t = np.empty((n_event), dtype='uint64')
-
-        event_p_file = f'{path}/dv_event_p_{i_epoch}.npy'
         event_p = np.empty((n_event), dtype='bool')
-
-        event_xy_distorted_file = f'{path}/dv_event_xy_distorted_{i_epoch}.npy'
         event_xy_distorted = np.empty((n_event, 2), dtype='int32')
-
-        event_xy_undistorted_file = f'{path}/dv_event_xy_undistorted_{i_epoch}.npy'
-        event_xy_undistorted = np.empty((n_event, 2), dtype='int32')
 
         with dv.NetworkEventInput(address=address, port=event_port) as f:
             progress = tqdm(total=n_event, leave=False)
@@ -221,73 +216,89 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
                 event_t[i_event] = event.timestamp
                 event_p[i_event] = event.polarity
                 event_xy_distorted[i_event] = [event.x, event.y]
-                event_xy_undistorted[i_event] = np.rint(cv2.undistortPoints(
-                    event_distorted.astype('float64'),
-                    camera_matrix, distortion_coefficients,
-                    None, camera_matrix)[0, 0])
-
-                x = event_xy_undistorted[0]
-                y = event_xy_undistorted[1]
-                if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
-                    event_image[y, x] += 1.0
 
                 i_event += 1
                 progress.update(1)
 
             progress.close()
 
-        if debug:
-            # plot unmasked event image
-            cv2.imshow('unmasked event image', (event_image / event_image.max()).astype('float32'))
-            cv2.waitKey()
+        # save raw data
+        np.save(event_t_file, event_t)
+        np.save(event_p_file, event_p)
+        np.save(event_xy_distorted_file, event_xy_distorted)
 
-        # event mask threshold
-        event_image_mask = (event_image > 0).astype('float32')
 
-        if debug:
-            # plot event image mask (threshold)
-            cv2.imshow('event image mask (threshold)', event_image_mask)
-            cv2.waitKey()
+    # == PROCESS RAW DATA ===
+    event_xy_undistorted = np.empty((n_event, 2), dtype='int32')
+    event_image = np.zeros(frame_shape[:2], dtype='int64')
 
-        # event mask erode and dilate
-        event_image_mask = cv2.erode(event_image_mask, erode_dv_kernel)
-        event_image_mask = cv2.dilate(event_image_mask, dilate_dv_kernel)
-        event_image[~(event_image_mask.astype('bool'))] = 0
-        event_xy_masked = np.array(
-            [xy for xy in event_xy_undistorted if event_image_mask[xy[1], xy[0]] > 0], dtype='int32')
+    for i_event in range(n_event):
+        event_xy_undistorted[i_event] = np.rint(cv2.undistortPoints(
+            event_distorted.astype('float64'),
+            camera_matrix, distortion_coefficients,
+            None, camera_matrix)[0, 0])
 
-        if debug:
-            # plot event image mask (erode and dilate)
-            cv2.imshow('event image mask (erode and dilate)', event_image_mask)
-            cv2.waitKey()
+        x = event_xy_undistorted[0]
+        y = event_xy_undistorted[1]
+        if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
+            event_image[y, x] += 1.0
 
-            # plot masked event image
-            cv2.imshow('masked event image', (event_image / event_image.max()).astype('float32'))
-            cv2.waitKey()
 
-        # k-means of masked events
-        k_means = KMeans(
-            n_clusters=marker_count,
-            init='k-means++',
-            n_init=100,
-            max_iter=300,
-            #tol=1e-4,
-            #random_state=0,
-        ).fit(event_xy_masked)
-        coordinates[:, :] = k_means.cluster_centers_
-        coordinates = identify_wand_markers(coordinates)
+    if debug:
+        # plot unmasked event image
+        cv2.imshow('unmasked event image', (event_image / event_image.max()).astype('float32'))
+        cv2.waitKey()
 
-        if debug:
-            coordinates_int[:, :] = np.rint(coordinates).astype('int32')
-            coordinates_image.fill(0)
-            coordinates_image[coordinates_int[:, 1], coordinates_int[:, 0]] = 255
+    # event mask threshold
+    event_image_mask = (event_image > 0).astype('float32')
 
-            # plot DV coordinates
-            cv2.imshow('event coordinates', coordinates_image)
-            cv2.waitKey()
+    if debug:
+        # plot event image mask (threshold)
+        cv2.imshow('event image mask (threshold)', event_image_mask)
+        cv2.waitKey()
 
-            # close debug plots
-            cv2.destroyAllWindows()
+    # event mask erode and dilate
+    event_image_mask = cv2.erode(event_image_mask, erode_dv_kernel)
+    event_image_mask = cv2.dilate(event_image_mask, dilate_dv_kernel)
+    event_image[~(event_image_mask.astype('bool'))] = 0
+    event_xy_masked = np.array(
+        [xy for xy in event_xy_undistorted if event_image_mask[xy[1], xy[0]] > 0], dtype='int32')
+
+    if debug:
+        # plot event image mask (erode and dilate)
+        cv2.imshow('event image mask (erode and dilate)', event_image_mask)
+        cv2.waitKey()
+
+        # plot masked event image
+        cv2.imshow('masked event image', (event_image / event_image.max()).astype('float32'))
+        cv2.waitKey()
+
+    # k-means of masked events
+    k_means = KMeans(
+        n_clusters=marker_count,
+        init='k-means++',
+        n_init=100,
+        max_iter=300,
+        #tol=1e-4,
+        #random_state=0,
+    ).fit(event_xy_masked)
+    coordinates = k_means.cluster_centers_
+    coordinates = identify_wand_markers(coordinates)
+
+    if debug:
+        coordinates_int = np.rint(coordinates).astype('int32')
+        coordinates_image = np.zeros(frame_shape[:2], dtype='uint8')
+        coordinates_image[coordinates_int[:, 1], coordinates_int[:, 0]] = 255
+
+        # plot DV coordinates
+        cv2.imshow('event coordinates', coordinates_image)
+        cv2.waitKey()
+
+        # close debug plots
+        cv2.destroyAllWindows()
+
+    # plot coordinates
+    if not reuse:
 
         with dv.NetworkFrameInput(address=address, port=frame_port) as f:
             frame = next(f)
@@ -309,12 +320,9 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
         ax.invert_yaxis()
         plt.show()
 
-        # save data
-        np.save(coordinates_file, coordinates)
-        np.save(event_t_file, event_t)
-        np.save(event_p_file, event_p)
-        np.save(event_xy_distorted_file, event_xy_distorted)
-        np.save(event_xy_undistorted_file, event_xy_undistorted)
+    # save processed data
+    np.save(event_xy_undistorted_file, event_xy_undistorted)
+    np.save(coordinates_file, coordinates)
 
     # print DV coordinates
     for i in range(marker_count):
@@ -331,8 +339,6 @@ def calibrate():
     test = True
 
     reuse = True
-    reuse_vicon = reuse
-    reuse_dv = reuse
 
     method = 2
 
@@ -370,22 +376,22 @@ def calibrate():
 
     i_epoch = 0
     while i_epoch < n_epoch:
-        if not (reuse_vicon and reuse_dv):
+        if not reuse:
             print(f'calibration epoch {i_epoch}')
             input('relocate prop and press enter...')
 
         vicon_wand_coordinates[i_epoch, :, :] = get_vicon_coordinates(
             i_epoch, vicon_address, vicon_port, prop_name, marker_names,
             n_frame=vicon_n_frame, t_frame=vicon_t_frame,
-            reuse=reuse_vicon, debug=debug, path=path)
+            reuse=reuse, debug=debug, path=path)
 
         dv_wand_coordinates[i_epoch, :, :] = get_dv_wand_coordinates(
             i_epoch, dv_address, dv_event_port, dv_frame_port, prop_name, marker_names,
             dv_camera_matrix, dv_distortion_coefficients,
             n_event=dv_n_event, frame_shape=dv_frame_shape,
-            reuse=reuse_dv, debug=debug, path=path)
-
-        if not (reuse_vicon and reuse_dv):
+            reuse=reuse, debug=debug, path=path)
+        
+        if not reuse:
             accept = ''
             while accept != 'y' and accept != 'n':
                 accept = input('accept epoch? (y/n): ')
