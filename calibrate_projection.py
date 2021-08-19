@@ -238,8 +238,8 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
             camera_matrix, distortion_coefficients,
             None, camera_matrix)[0, 0])
 
-        x = event_xy_undistorted[0]
-        y = event_xy_undistorted[1]
+        x = event_xy_undistorted[i_event, 0]
+        y = event_xy_undistorted[i_event, 1]
         if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
             event_image[y, x] += 1.0
 
@@ -355,7 +355,7 @@ def calibrate():
 
     # make calibration directory
     if not reuse:
-        os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
 
     # DV camera calibration
     dv_camera_matrix = np.load('./calibration/camera_matrix.npy')
