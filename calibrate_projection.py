@@ -267,7 +267,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
     i_event = 0
 
     for event_xy in event_xy_undistorted:
-        x = xy_event[0]
+        x = event_xy[0]
         y = event_xy[1]
 
         if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
