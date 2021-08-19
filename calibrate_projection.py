@@ -566,7 +566,7 @@ def calibrate():
                         marker_name = marker_names[i_marker][0]
 
                         translation = vicon_client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
-                        translation = np.array([translation])
+                        translation = np.array(translation)
 
                         # transform from Vicon space to DV camera space
                         xy = vicon_to_dv(m, translation)
