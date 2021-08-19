@@ -234,7 +234,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
     for i_event in range(n_event):
         event_xy_undistorted[i_event] = np.rint(cv2.undistortPoints(
-            event_distorted.astype('float64'),
+            event_xy_distorted.astype('float64'),
             camera_matrix, distortion_coefficients,
             None, camera_matrix)[0, 0])
 
@@ -335,12 +335,11 @@ def calibrate():
 
     n_epoch = 20
 
-    debug = False
-    test = True
+    method = 2
 
     reuse = True
-
-    method = 2
+    debug = False
+    test = True
 
     path = './calibration'
 
