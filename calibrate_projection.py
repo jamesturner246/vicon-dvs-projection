@@ -312,7 +312,7 @@ def calibrate():
     reuse_vicon = reuse
     reuse_dv = reuse
 
-    windows_vicon_sdk = True
+    method = 2
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -371,7 +371,7 @@ def calibrate():
     if method == 1:
 
         def vicon_to_dv(m, v):
-            z = vicon_to_camera_centric(m, v):
+            z = vicon_to_camera_centric(m, v)
             z *= (1.0 / z[2]) * 4  # focal length 4 mm
             z = z[:2]
             z /= 1.8e-2            # 18 micrometer/pixel = 1.8e-2 mm/pixel
@@ -384,7 +384,7 @@ def calibrate():
             z += m[9:12] * 10      # add the translation (using cm for a better scale of fitting)
             return z
 
-        def err_fun(m, vicon_p, dv_p, vicon_to_dv):
+        def err_fun(m, vicon_p, dv_p):
             assert dv_p.shape[0] == vicon_p.shape[0]
 
             error = 0.0
@@ -397,7 +397,7 @@ def calibrate():
 
         # Vicon to DV transformation
         m_file = './calibration/bootstrap_dv_space_transform.npy'
-        m = np.load(dv_space_transform_file)
+        m = np.load(m_file)
         x = np.vstack(vicon_wand_coordinates)
         y = np.vstack(dv_wand_coordinates)
 
@@ -455,7 +455,7 @@ def calibrate():
                 [0, 0, 1]]), M)
             return M
 
-        def err_fun(m, vicon_p, dv_p, vicon_to_dv):
+        def err_fun(m, vicon_p, dv_p):
             # the meaning of m is as follows:
             # 0-2 Euler angles of transform into camera oriented space
             # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
