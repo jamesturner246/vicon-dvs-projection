@@ -234,7 +234,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
     for i_event in range(n_event):
         event_xy_undistorted[i_event] = np.rint(cv2.undistortPoints(
-            event_xy_distorted.astype('float64'),
+            event_xy_distorted.astype('float64')[i_event],
             camera_matrix, distortion_coefficients,
             None, camera_matrix)[0, 0])
 
@@ -261,8 +261,21 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
     event_image_mask = cv2.erode(event_image_mask, erode_dv_kernel)
     event_image_mask = cv2.dilate(event_image_mask, dilate_dv_kernel)
     event_image[~(event_image_mask.astype('bool'))] = 0
-    event_xy_masked = np.array(
-        [xy for xy in event_xy_undistorted if event_image_mask[xy[1], xy[0]] > 0], dtype='int32')
+
+    # mask events
+    event_xy_masked = np.empty((n_event, 2), dtype='int32')
+    i_event = 0
+
+    for event_xy in event_xy_undistorted:
+        x = xy_event[0]
+        y = event_xy[1]
+
+        if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
+            if event_image_mask[y, x] > 0:
+                event_xy_masked[i_event] = event_xy
+                i_event += 1
+
+    event_xy_masked.resize((i_event, 2))
 
     if debug:
         # plot event image mask (erode and dilate)
@@ -335,9 +348,9 @@ def calibrate():
 
     n_epoch = 20
 
-    method = 2
+    method = 1
 
-    reuse = True
+    reuse = False
     debug = False
     test = True
 
