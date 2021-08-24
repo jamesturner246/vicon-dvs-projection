@@ -11,36 +11,36 @@
                     <projection_calibration_path>
 
                 event.h5
-                    for i in {1,2}:
-                        timestamp_i: uint64[1]
-                        polarity_i: bool[1]
-                        xy_distorted: uint16[2]
-                        xy_undistorted: uint16[2]
-                        label_i: int8[1]
+                    for i in {0,1}:
+                        f.root.timestamp_<i>: uint64[1]
+                        f.root.polarity_<i>: bool[1]
+                        f.root.xy_distorted_<i>: uint16[2]
+                        f.root.xy_undistorted_<i>: uint16[2]
+                        f.root.label_<i>: int8[1]
 
                 frame.h5
-                    for i in {1,2}:
-                        timestamp_i: uint64[1]
-                        image_i_distorted: uint8[260, 346, 3]
-                        image_i_undistorted: uint8[260, 346, 3]
-                        label_i: uint8[260, 346]
+                    for i in {0,1}:
+                        f.root.timestamp_<i>: uint64[1]
+                        f.root.image_distorted_<i>: uint8[260, 346, 3]
+                        f.root.image_undistorted_<i>: uint8[260, 346, 3]
+                        f.root.label_<i>: uint8[260, 346]
 
                 pose.h5
-                    timestamp: uint64[1]
-                    extrapolated[prop]: bool[1]
-                    rotation[prop]: float64[3]
-                    translation[prop][marker]: float64[3]
-                    for i in {1,2}:
-                        camera_rotation_i[prop]: float64[3]
-                        camera_translation_i[prop][marker]: float64[3]
+                    f.root.timestamp: uint64[1]
+                    f.root.props.<prop_name>.extrapolated: bool[1]
+                    f.root.props.<prop_name>.rotation: float64[3]
+                    f.root.props.<prop_name>.translation.<marker_name>: float64[3]
+                    for i in {0,1}:
+                        f.root.props.<prop_name>.camera_rotation_<i>: float64[3]
+                        f.root.props.<prop_name>.camera_translation_<i>.<marker_name>: float64[3]
 
     camera_calibration/
         <date_time>/
-            for i in {1,2}:
-                camera_matrix_i.npy
-                camera_distortion_coefficients_i.npy
+            for i in {0,1}:
+                camera_matrix_<i>.npy
+                camera_distortion_coefficients_<i>.npy
 
     projection_calibration/
         <date_time>/
-            for i in {1,2}:
-                dv_space_transform_i.npy
+            for i in {0,1}:
+                dv_space_transform_<i>.npy

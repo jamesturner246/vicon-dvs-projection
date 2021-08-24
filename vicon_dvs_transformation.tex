@@ -9,12 +9,12 @@
 \section{Dataset Structure}
 The dataset consists of 15 second recordings of pixelwise labelled RGB frames and labelled DVS events, with accompanying pose information. Data is recorded using two iniVation DAVIS 346 neuromorphic DVS cameras, which enable the simultaneous capture of binocular RGB frames and binocular pixelwise brightness changing `events'. The recordings can be categorised into various prop scenarios, in which various tool props are interacted with to varying degrees. In the first scenario, individual tool props are suspended using transparent fishing line, and perturbed in view of the cameras. In the second scenario, multiple tool props are suspended and perturbed in view of the cameras. In the third scenario, one or more tool props are held and interacted with by a human in view of the cameras. The data from each prop scenario is further categorised by the type of data contained within. Thanks to the use of iniVation DAVIS 346 cameras, our method allows the simultaneous generation of labelled RGB frame data and visual event data, so both types are included in the dataset.
 
-Recorded data directories take the form \lstinline|./data/<category>/<sample #>|. Each directory contains three HDF5 files containing segmented RGB frames, segmented DVS events and prop pose information. For each recording, both raw and undistorted (after lens distortion correction) data is saved. RGB frame and visual event labels are integers, with $0$ meaning `background', $-1$ meaning `ambiguous' (multiple props overlap) and any $i > 0$ denoting class $i$. The fields of the RGB frame file \lstinline|frame.h5| are as follows, where $i \in \{1,...,n\}$ and $n = 2$ is the number of cameras:
+Recorded data directories take the form \lstinline|./data/<category>/<sample #>|. Each directory contains three HDF5 files containing segmented RGB frames, segmented DVS events and prop pose information. For each recording, both raw and undistorted (after lens distortion correction) data is saved. RGB frame and visual event labels are integers, with $0$ meaning `background', $-1$ meaning `ambiguous' (multiple props overlap) and any $i > 0$ denoting class $i$. The fields of the RGB frame file \lstinline|frame.h5| are as follows, where $i \in \{0,...,n-1\}$ and $n = 2$ is the number of cameras:
 \begin{center}
 	\begin{tabular}{|c|c|}
 		timestamp\_$i$           & frame timestamp (camera $i$) \\
-		image\_$i$\_distorted    & frame before distortion correction (camera $i$) \\
-		image\_$i$\_undistorted  & frame after distortion correction (camera $i$) \\
+		image\_distorted\_$i$    & frame before distortion correction (camera $i$) \\
+		image\_undistorted\_$i$  & frame after distortion correction (camera $i$) \\
 		label\_$i$               & pixelwise frame label (camera $i$) \\
 	\end{tabular}
 \end{center}
@@ -34,7 +34,7 @@ Prop pose information, including translation and rotation (respectively millimet
 		timestamp                           & pose timestamp \\
 		extrapolated[$p$]                   & true when the pose of prop $p$ was extrapolated \\
 		rotation[$p$]                       & prop $p$ rotation in global coordinates \\
-		camera\_rotation\_i[$p$]            & prop $p$ rotation relative to camera $i$ \\
+		camera\_rotation\_$i$[$p$]          & prop $p$ rotation relative to camera $i$ \\
 		translation[$p$][$m$]               & prop $p$ marker $m$ translation in global coordinates \\
 		camera\_translation\_$i$[$p$][$m$]  & prop $p$ marker $m$ translation relative to camera $i$ \\
 	\end{tabular}

@@ -12,20 +12,100 @@ import stl
 import cv2
 import dv
 
-from calibrate_projection import vicon_to_dv_2
-from calibrate_projection import vicon_to_camera_centric_2
+from calibrate_projection import vicon_to_dv_2 as vicon_to_dv
+from calibrate_projection import vicon_to_camera_centric_2 as vicon_to_camera_centric
 
 
-def get_events(address, port, record_time, camera_matrix, distortion_coefficients,
-               f_name='./data/raw_event.h5'):
-    f = tables.open_file(f_name, mode='w')
-    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-    f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
-    f_xy_distorted = f.create_earray(f.root, 'xy_distorted', tables.atom.UInt16Atom(), (0, 2))
-    f_xy_undistorted = f.create_earray(f.root, 'xy_undistorted', tables.atom.UInt16Atom(), (0, 2))
+def create_event_file(f_name):
+    if os.path.exists(f_name):
+        os.remove(f_name)
+
+    f = tables.open_file(f_name, mode='a')
+    data = {}
+
+    for i in range(2):
+        data[f'timestamp_{i}'] = f.create_earray(
+            f.root, f'timestamp_{i}', tables.atom.UInt64Atom(), (0,))
+        data[f'polarity_{i}'] = f.create_earray(
+            f.root, f'polarity_{i}', tables.atom.BoolAtom(), (0,))
+        data[f'xy_distorted_{i}'] = f.create_earray(
+            f.root, f'xy_distorted_{i}', tables.atom.UInt16Atom(), (0, 2))
+        data[f'xy_undistorted_{i}'] = f.create_earray(
+            f.root, f'xy_undistorted_{i}', tables.atom.UInt16Atom(), (0, 2))
+        data[f'label_{i}'] = f.create_earray(
+            f.root, f'label_{i}', tables.atom.Int8Atom(), (0,))
+
+    return f, data
+
+
+def create_frame_file(f_name):
+    if os.path.exists(f_name):
+        os.remove(f_name)
+
+    f = tables.open_file(f_name, mode='a')
+    data = {}
+
+    for i in range(2):
+        data[f'timestamp_{i}'] = f.create_earray(
+            f.root, f'timestamp_{i}', tables.atom.UInt64Atom(), (0,))
+        data[f'image_distorted_{i}'] = f.create_earray(
+            f.root, f'image_distorted_{i}', tables.atom.UInt8Atom(), (0, 260, 346, 3))
+        data[f'image_undistorted_{i}'] = f.create_earray(
+            f.root, f'image_undistorted_{i}', tables.atom.UInt8Atom(), (0, 260, 346, 3))
+        data[f'label_{i}'] = f.create_earray(
+            f.root, f'label_{i}', tables.atom.UInt8Atom(), (0, 260, 346))
+
+    return f, data
+
+
+def create_vicon_file(f_name, props):
+    if os.path.exists(f_name):
+        os.remove(f_name)
+
+    f = tables.open_file(f_name, mode='a')
+    data = {}
+
+    data['timestamp'] = f.create_earray(
+        f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
+    data['extrapolated'] = {}
+    data['rotation'] = {}
+    data['translation'] = {}
+    for i in range(2):
+        data[f'camera_rotation_{i}'] = {}
+        data[f'camera_translation_{i}'] = {}
+
+    g_props = f.create_group(f.root, 'props')
+    for prop_name in props.keys():
+        g_prop = f.create_group(g_props, prop_name)
+        data['extrapolated'] = f.create_earray(
+            g_prop, 'extrapolated', tables.atom.BoolAtom(), (0,))
+
+        data['rotation'] = f.create_earray(
+            g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
+        data['translation'][prop_name] = {}
+        g_translation = f.create_group(g_prop, 'translation')
+        for marker_name in props[prop_name].keys():
+            data['translation'][prop_name] = f.create_earray(
+                g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
+
+        for i in range(2):
+            data[f'camera_rotation_{i}'] = f.create_earray(
+                g_prop, f'camera_rotation_{i}', tables.atom.Float64Atom(), (0, 3))
+            data[f'camera_translation_{i}'][prop_name] = {}
+            g_camera_translation = f.create_group(g_prop, f'camera_translation_{i}')
+            for marker_name in props[prop_name].keys():
+                data[f'camera_translation_{i}'][prop_name] = f.create_earray(
+                    g_camera_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
+
+    return f, data
+
+
+def get_events(camera, record_seconds, address, port, mtx, dist, f_name):
+    f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
         event = next(event_f)
+        record_time = record_seconds * 1000000
         stop_time = event.timestamp + record_time
 
         for event in event_f:
@@ -35,26 +115,23 @@ def get_events(address, port, record_time, camera_matrix, distortion_coefficient
             # undistort event
             event_distorted = np.array([event.x, event.y], dtype='float64')
             event_undistorted = cv2.undistortPoints(
-                event_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)[0, 0]
+                event_distorted, mtx, dist, None, mtx)[0, 0]
 
-            f_timestamp.append([event.timestamp])
-            f_polarity.append([event.polarity])
-            f_xy_distorted.append([event_distorted])
-            f_xy_undistorted.append([event_undistorted])
+            data[f'timestamp_{camera}'].append([event.timestamp])
+            data[f'polarity_{camera}'].append([event.polarity])
+            data[f'xy_distorted_{camera}'].append([event_distorted])
+            data[f'xy_undistorted_{camera}'].append([event_undistorted])
 
     f.close()
     return
 
 
-def get_frames(address, port, record_time, camera_matrix, distortion_coefficients,
-               f_name='./data/raw_frame.h5'):
-    f = tables.open_file(f_name, mode='w')
-    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-    f_image_distorted = f.create_earray(f.root, 'image_distorted', tables.atom.UInt8Atom(), (0, 260, 346, 3))
-    f_image_undistorted = f.create_earray(f.root, 'image_undistorted', tables.atom.UInt8Atom(), (0, 260, 346, 3))
+def get_frames(camera, record_seconds, address, port, mtx, dist, f_name):
+    f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
         frame = next(frame_f)
+        record_time = record_seconds * 1000000
         stop_time = frame.timestamp_end_of_frame + record_time
 
         for frame in frame_f:
@@ -64,32 +141,23 @@ def get_frames(address, port, record_time, camera_matrix, distortion_coefficient
             # undistort frame
             frame_distorted = frame.image[:, :, :]
             frame_undistorted = cv2.undistort(
-                frame_distorted, camera_matrix, distortion_coefficients, None, camera_matrix)
+                frame_distorted, mtx, dist, None, mtx)
 
-            f_timestamp.append([frame.timestamp])
-            f_image_distorted.append([frame_distorted])
-            f_image_undistorted.append([frame_undistorted])
+            data[f'timestamp_{camera}'].append([frame.timestamp])
+            data[f'image_distorted_{camera}'].append([frame_distorted])
+            data[f'image_undistorted_{camera}'].append([frame_undistorted])
 
     f.close()
     return
 
 
-def get_vicon(address, port, record_time, props,
-              f_name='./data/raw_pose.h5'):
+def get_vicon(record_seconds, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
-    sanity_check = False
+    f, data = create_vicon_file(f_name, props)
 
-    f = tables.open_file(f_name, mode='w')
-    f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-    g_props = f.create_group(f.root, 'props')
-    for prop_name in props.keys():
-        g_prop = f.create_group(g_props, prop_name)
-        f.create_earray(g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
-        g_translation = f.create_group(g_prop, 'translation')
-        for marker_name in props[prop_name].keys():
-            f.create_earray(g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
+    sanity_check = False
 
     client = ViconDataStream.Client()
     client.Connect(f'{address}:{port}')
@@ -124,6 +192,7 @@ def get_vicon(address, port, record_time, props,
 
     # begin frame collection
     timestamp = int(datetime.now().timestamp() * 1000000)
+    record_time = record_seconds * 1000000
     stop_time = timestamp + record_time
 
     while timestamp < stop_time:
@@ -131,7 +200,7 @@ def get_vicon(address, port, record_time, props,
             continue
 
         timestamp = int(datetime.now().timestamp() * 1000000)
-        f_timestamp.append([timestamp])
+        data['timestamp'].append([timestamp])
 
         prop_names = client.GetSubjectNames()
         prop_count = len(prop_names)
@@ -152,23 +221,23 @@ def get_vicon(address, port, record_time, props,
 
                 rotation = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
                 rotation = (rotation * 180 / np.pi) + 180
-                g_props[prop_name].rotation.append([rotation])
+                data['rotation'][prop_name].append([rotation])
 
                 for marker_i in range(marker_count):
                     marker_name = marker_names[marker_i][0]
 
                     translation = client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
-                    g_props[prop_name].translation[marker_name].append([translation])
+                    data['translation'][prop_name][marker_name].append([translation])
 
             else:
                 rotation = np.full((1, 3), np.nan)
-                g_props[prop_name].rotation.append(rotation)
+                data['rotation'][prop_name].append(rotation)
 
                 for marker_i in range(marker_count):
                     marker_name = marker_names[marker_i][0]
 
                     translation = np.full((1, 3), np.nan)
-                    g_props[prop_name].translation[marker_name].append(translation)
+                    data['translation'][prop_name][marker_name].append(translation)
 
     client.Disconnect()
 
@@ -176,21 +245,21 @@ def get_vicon(address, port, record_time, props,
     return
 
 
-def get_next_event(event_iter, usec_offset=0):
+def get_next_event(event_iter, camera, usec_offset=0):
     event = {}
-    event['timestamp'] = np.uint64(next(event_iter['timestamp']) + usec_offset)
-    event['polarity'] = next(event_iter['polarity'])
-    event['xy_distorted'] = next(event_iter['xy_distorted'])
-    event['xy_undistorted'] = next(event_iter['xy_undistorted'])
+    event[f'timestamp_{camera}'] = np.uint64(next(event_iter[f'timestamp_{camera}']) + usec_offset)
+    event[f'polarity_{camera}'] = next(event_iter[f'polarity_{camera}'])
+    event[f'xy_distorted_{camera}'] = next(event_iter[f'xy_distorted_{camera}'])
+    event[f'xy_undistorted_{camera}'] = next(event_iter[f'xy_undistorted_{camera}'])
 
     return event
 
 
-def get_next_frame(frame_iter, usec_offset=0):
+def get_next_frame(frame_iter, camera, usec_offset=0):
     frame = {}
-    frame['timestamp'] = np.uint64(next(frame_iter['timestamp']) + usec_offset)
-    frame['image_distorted'] = next(frame_iter['image_distorted'])
-    frame['image_undistorted'] = next(frame_iter['image_undistorted'])
+    frame[f'timestamp_{camera}'] = np.uint64(next(frame_iter[f'timestamp_{camera}']) + usec_offset)
+    frame[f'image_distorted_{camera}'] = next(frame_iter[f'image_distorted_{camera}'])
+    frame[f'image_undistorted_{camera}'] = next(frame_iter[f'image_undistorted_{camera}'])
 
     return frame
 
@@ -211,93 +280,17 @@ def get_next_vicon(vicon_iter, usec_offset=0):
     return vicon
 
 
-def create_processed_event_file(f_name='./data/event.h5'):
-    if os.path.exists(f_name):
-        os.remove(f_name)
-
-    f = tables.open_file(f_name, mode='a')
-
-    data = {}
-    data['timestamp'] = f.create_earray(
-        f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-    data['polarity'] = f.create_earray(
-        f.root, 'polarity', tables.atom.BoolAtom(), (0,))
-    data['xy_distorted'] = f.create_earray(
-        f.root, 'xy_distorted', tables.atom.UInt16Atom(), (0, 2))
-    data['xy_undistorted'] = f.create_earray(
-        f.root, 'xy_undistorted', tables.atom.UInt16Atom(), (0, 2))
-    data['label'] = f.create_earray(
-        f.root, 'label', tables.atom.Int8Atom(), (0,))
-
-    return data
-
-
-def create_processed_frame_file(f_name='./data/frame.h5'):
-    if os.path.exists(f_name):
-        os.remove(f_name)
-
-    f = tables.open_file(f_name, mode='a')
-
-    data = {}
-    data['timestamp'] = f.create_earray(
-        f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-    data['image_distorted'] = f.create_earray(
-        f.root, 'image_distorted', tables.atom.UInt8Atom(), (0, 260, 346, 3))
-    data['image_undistorted'] = f.create_earray(
-        f.root, 'image_undistorted', tables.atom.UInt8Atom(), (0, 260, 346, 3))
-    data['label'] = f.create_earray(
-        f.root, 'label', tables.atom.UInt8Atom(), (0, 260, 346))
-
-    return data
-
-
-def create_processed_vicon_file(props, f_name='./data/vicon.h5'):
-    if os.path.exists(f_name):
-        os.remove(f_name)
-
-    f = tables.open_file(f_name, mode='a')
-
-    data = {}
-    data['timestamp'] = f.create_earray(
-        f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
-    data['extrapolated'] = {}
-    data['rotation'] = {}
-    data['camera_rotation'] = {}
-    data['translation'] = {}
-    data['camera_translation'] = {}
-    g_props = f.create_group(f.root, 'props')
-    for prop_name in props.keys():
-        g_prop = f.create_group(g_props, prop_name)
-        data['extrapolated'] = f.create_earray(
-            g_prop, 'extrapolated', tables.atom.BoolAtom(), (0,))
-        data['rotation'] = f.create_earray(
-            g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
-        data['camera_rotation'] = f.create_earray(
-            g_prop, 'camera_rotation', tables.atom.Float64Atom(), (0, 3))
-        data['translation'][prop_name] = {}
-        g_translation = f.create_group(g_prop, 'translation')
-        g_camera_translation = f.create_group(g_prop, 'camera_translation')
-        for marker_name in props[prop_name].keys():
-            data['translation'][prop_name] = f.create_earray(
-                g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
-            data['camera_translation'][prop_name] = f.create_earray(
-                g_camera_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
-
-    return data
-
-
 def projection():
 
     record = False
     test_scenario = 'no_human'
     test_number = 0
 
-    path_camera_calib = './camera_calibration'
-    path_projection_calib = './projection_calibration'
+    path_camera = './camera_calibration'
+    path_projection = './projection_calibration'
     path_data = f'./data/{test_scenario}/{test_number:04}'
 
     record_seconds = 10
-    record_time = record_seconds * 1000000
 
     #vicon_usec_offset = -155000
     vicon_usec_offset = -600000
@@ -313,8 +306,12 @@ def projection():
     vicon_bad_frame_timeout = 100
     vicon_buffer_length = 300
 
+    prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
+
     vicon_address, vicon_port = '127.0.0.1', 801
-    dv_address, event_port, frame_port = '127.0.0.1', 36000, 36001
+    dv_address = '127.0.0.1'
+    event_port = [36000, 36001]
+    frame_port = [36002, 36003]
 
     props = {}
     mesh = {}
@@ -343,14 +340,14 @@ def projection():
 
     # === CALIBRATION FILES ===
 
-    dv_camera_matrix_file_name = f'{path_camera_calib}/camera_matrix.npy'
-    dv_camera_matrix = np.load(dv_camera_matrix_file_name)
+    dv_camera_mtx_file_name = [f'{path_camera}/camera_{i}_matrix.npy' for i in range(2)]
+    dv_camera_mtx = [np.load(file_name) for file_name in dv_camera_mtx_file_name]
 
-    dv_distortion_coefficients_file_name = f'{path_camera_calib}/camera_distortion_coefficients.npy'
-    dv_distortion_coefficients = np.load(dv_distortion_coefficients_file_name)
+    dv_camera_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
+    dv_camera_dist = [np.load(file_name) for file_name in dv_camera_dist_file_name]
 
-    dv_space_transform_file_name = f'{path_projection_calib}/dv_space_transform.npy'
-    dv_space_transform = np.load(dv_space_transform_file_name)
+    dv_space_transform_file_name = [f'{path_projection}/dv_space_{i}_transform.npy' for i in range(2)]
+    dv_space_transform = [np.load(file_name) for file_name in dv_space_transform_file_name]
 
 
     ##################################################################
@@ -361,24 +358,22 @@ def projection():
     for f in os.listdir(path_data):
         os.remove(path_data + f)
 
-    event_image_video_file_name = f'{path_data}/event_image_video.avi'
-    event_frame_video_file_name = f'{path_data}/frame_image_video.avi'
+    raw_event_file_name = [f'{path_data}/raw_event_{i}.h5' for i in range(2)]
+    raw_frame_file_name = [f'{path_data}/raw_frame_{i}.h5' for i in range(2)]
+    raw_vicon_file_name = f'{path_data}/raw_pose.h5'
 
-    event_file_name = f'{path_data}/raw_event.h5'
-    frame_file_name = f'{path_data}/raw_frame.h5'
-    vicon_file_name = f'{path_data}/raw_pose.h5'
+    final_event_file_name = f'{path_data}/event.h5'
+    final_frame_file_name = f'{path_data}/frame.h5'
+    final_vicon_file_name = f'{path_data}/pose.h5'
 
-    processed_event_file_name = f'{path_data}/event.h5'
-    processed_frame_file_name = f'{path_data}/frame.h5'
-    processed_vicon_file_name = f'{path_data}/pose.h5'
+    # event_video_file_name = [f'{path_data}/event_{i}_video.avi' for i in range(2)]
+    # frame_video_file_name = [f'{path_data}/frame_{i}_video.avi' for i in range(2)]
 
 
 
 
     # TODO: JSON FILE AND LINK EXISTING CALIBRATION FILES
 
-
-    # TODO: MULTI-CAMERA
 
 
 
@@ -392,17 +387,20 @@ def projection():
 
         processes = []
         processes.append(Process(target=get_events,
-                                 args=(dv_address, event_port, record_time,
-                                       dv_camera_matrix, dv_distortion_coefficients),
-                                 kwargs={'file_name': event_file_name}))
+                                 args=(0, record_seconds, dv_address, event_port[0],
+                                       dv_camera_mtx[0], dv_camera_dist[0], raw_event_file_name[0])))
+        processes.append(Process(target=get_events,
+                                 args=(1, record_seconds, dv_address, event_port[1],
+                                       dv_camera_mtx[1], dv_camera_dist[1], raw_event_file_name[1])))
         processes.append(Process(target=get_frames,
-                                 args=(dv_address, frame_port, record_time,
-                                       dv_camera_matrix, dv_distortion_coefficients),
-                                 kwargs={'file_name': frame_file_name}))
+                                 args=(0, record_seconds, dv_address, frame_port[0],
+                                       dv_camera_mtx[0], dv_camera_dist[0], raw_frame_file_name[0])))
+        processes.append(Process(target=get_frames,
+                                 args=(1, record_seconds, dv_address, frame_port[1],
+                                       dv_camera_mtx[1], dv_camera_dist[1], raw_frame_file_name[1])))
         processes.append(Process(target=get_vicon,
-                                 args=(vicon_address, vicon_port, record_time,
-                                       props),
-                                 kwargs={'file_name': vicon_file_name}))
+                                 args=(record_seconds, vicon_address, vicon_port,
+                                       props, raw_vicon_file_name)))
 
         for p in processes:
             p.start()
@@ -419,22 +417,22 @@ def projection():
 
 
 
-    # load original Vicon data
-    vicon_file = tables.open_file(vicon_file_name, mode='r')
-    vicon_iter = {}
-    vicon_iter['timestamp'] = vicon_file.root.timestamp.iterrows()
-    vicon_iter['rotation'] = {}
-    vicon_iter['translation'] = {}
-    for prop in vicon_file.root.props:
+    # load raw Vicon data
+    raw_vicon_file = tables.open_file(raw_vicon_file_name, mode='r')
+    raw_vicon_iter = {}
+    raw_vicon_iter['timestamp'] = raw_vicon_file.root.timestamp.iterrows()
+    raw_vicon_iter['rotation'] = {}
+    raw_vicon_iter['translation'] = {}
+    for prop in raw_vicon_file.root.props:
         prop_name = prop._v_name
-        vicon_iter['rotation'][prop_name] = prop.rotation.iterrows()
-        vicon_iter['translation'][prop_name] = {}
+        raw_vicon_iter['rotation'][prop_name] = prop.rotation.iterrows()
+        raw_vicon_iter['translation'][prop_name] = {}
         for marker in prop.translation:
             marker_name = marker.name
-            vicon_iter['translation'][prop_name][marker_name] = marker.iterrows()
+            raw_vicon_iter['translation'][prop_name][marker_name] = marker.iterrows()
 
-    # create processed Vicon data file
-    processed_vicon_data = create_processed_vicon_file(props, f_name=processed_vicon_file_name)
+    # create final Vicon data file
+    final_vicon_file, final_vicon_data = create_vicon_file(final_vicon_file_name, props)
 
     # initialise good Vicon frame buffer
     vicon_timestamp_buffer = {}
@@ -448,8 +446,8 @@ def projection():
             vicon_translation_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
 
     # get Vicon frames
-    vicon_old = get_next_vicon(vicon_iter, usec_offset=vicon_usec_offset)
-    vicon = get_next_vicon(vicon_iter, usec_offset=vicon_usec_offset)
+    vicon_old = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
+    vicon = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
 
     # append to good Vicon frame buffers
     timestamp = vicon_old['timestamp']
@@ -466,24 +464,26 @@ def projection():
     while True:
 
         try:
-            vicon_new = get_next_vicon(vicon_iter, usec_offset=vicon_usec_offset)
+            vicon_new = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
         except StopIteration:
             break
 
-        processed_vicon_data['timestamp'].append([vicon['timestamp']])
+        final_vicon_data['timestamp'].append([vicon['timestamp']])
 
         # for each prop
         for prop_name in props.keys():
-            processed_vicon_data['extrapolated'][prop_name].append([False])
+            final_vicon_data['extrapolated'][prop_name].append([False])
             rotation = vicon['rotation'][prop_name]
-            processed_vicon_data['rotation'][prop_name].append([rotation])
-            camera_rotation = rotation + dv_space_transform[:3]
-            processed_vicon_data['camera_rotation'][prop_name].append([camera_rotation])
+            final_vicon_data['rotation'][prop_name].append([rotation])
+            for i in range(2):
+                cam_rotation = rotation + dv_space_transform[i][:3]
+                final_vicon_data[f'camera_rotation_{i}'][prop_name].append([cam_rotation])
             for marker_name in props[prop_name].keys():
                 translation = vicon['translation'][prop_name][marker_name]
-                processed_vicon_data['translation'][prop_name][marker_name].append([translation])
-                camera_translation = vicon_to_camera_centric_2(dv_space_transform, translation)
-                processed_vicon_data['camera_translation'][prop_name][marker_name].append([camera_translation])
+                final_vicon_data['translation'][prop_name][marker_name].append([translation])
+                for i in range(2):
+                    cam_translation = vicon_to_camera_centric(dv_space_transform[i], translation)
+                    final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name].append([cam_translation])
 
             # check current Vicon frame
             frame_is_good = True
@@ -506,23 +506,25 @@ def projection():
 
                 if bad_frame_count < vicon_bad_frame_timeout:
                     print('DEBUG: extrapolating bad frame')
-                    processed_vicon_data['extrapolated'][prop_name][-1] = True
+                    final_vicon_data['extrapolated'][prop_name][-1] = True
 
                     x = np.array(vicon_timestamp_buffer[prop_name])
 
                     y = np.array(vicon_rotation_buffer[prop_name])
                     f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
                     rotation = f(vicon['timestamp'])
-                    processed_vicon_data['rotation'][prop_name][-1] = rotation
-                    camera_rotation = rotation + dv_space_transform[:3]
-                    processed_vicon_data['camera_rotation'][prop_name][-1] = camera_rotation
+                    final_vicon_data['rotation'][prop_name][-1] = rotation
+                    for i in range(2):
+                        cam_rotation = rotation + dv_space_transform[i][:3]
+                        final_vicon_data[f'camera_rotation_{i}'][prop_name][-1] = cam_rotation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_translation_buffer[prop_name][marker_name])
                         f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
                         translation = f(vicon['timestamp'])
-                        processed_vicon_data['translation'][prop_name][marker_name][-1] = translation
-                        camera_translation = vicon_to_camera_centric_2(dv_space_transform, translation)
-                        processed_vicon_data['camera_translation'][prop_name][marker_name][-1] = camera_translation
+                        final_vicon_data['translation'][prop_name][marker_name][-1] = translation
+                        for i in range(2):
+                            cam_translation = vicon_to_camera_centric(dv_space_transform[i], translation)
+                            final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name][-1] = cam_translation
 
                 else: # bad frame timeout
                     print('DEBUG: bad frame timeout')
@@ -531,20 +533,18 @@ def projection():
                     # clear frame buffer
                     vicon_timestamp_buffer[prop_name].clear()
                     vicon_rotation_buffer[prop_name].clear()
-                    vicon_camera_rotation_buffer[prop_name].clear()
                     for marker_name in props[prop_name].keys():
                         vicon_translation_buffer[prop_name][marker_name].clear()
-                        vicon_camera_translation_buffer[prop_name][marker_name].clear()
 
                     # void bad frame data
                     for i in range(-1, -vicon_bad_frame_timeout, -1):
                         rotation = np.full((1, 3), np.nan)
-                        processed_vicon_data['rotation'][prop_name][i] = rotation
-                        processed_vicon_data['camera_rotation'][prop_name][i] = rotation
+                        final_vicon_data['rotation'][prop_name][i] = rotation
+                        final_vicon_data['camera_rotation'][prop_name][i] = rotation
                         for marker_name in props[prop_name].keys():
                             translation = np.full((1, 3), np.nan)
-                            processed_vicon_data['translation'][prop_name][marker_name][i] = translation
-                            processed_vicon_data['camera_translation'][prop_name][marker_name][i] = translation
+                            final_vicon_data['translation'][prop_name][marker_name][i] = translation
+                            final_vicon_data['camera_translation'][prop_name][marker_name][i] = translation
 
             # append good Vicon frame to buffer
             if frame_is_good:
@@ -564,8 +564,8 @@ def projection():
         vicon = vicon_new
 
 
-    vicon_file.close()
-    processed_vicon_file.close()
+    raw_vicon_file.close()
+    final_vicon_file.close()
 
 
     ##################################################################
@@ -581,79 +581,89 @@ def projection():
     grey = (50, 50, 50)
 
     # initialise temp memory
-    event_pos = np.zeros(dv_shape[:2], dtype='uint64')
-    event_neg = np.zeros(dv_shape[:2], dtype='uint64')
-    event_image = np.zeros(dv_shape, dtype='uint8')
-    frame_image = np.zeros(dv_shape, dtype='uint8')
-    frame_label = np.zeros(dv_shape[:2], dtype='int8')
-    prop_masks = {name: np.empty(dv_shape[:2], dtype='uint8') for name in props.keys()}
+    event_pos = [np.zeros(dv_shape[:2], dtype='uint64') for i in range(2)]
+    event_neg = [np.zeros(dv_shape[:2], dtype='uint64') for i in range(2)]
+    event_image = [np.zeros(dv_shape, dtype='uint8') for i in range(2)]
+    frame_image = [np.zeros(dv_shape, dtype='uint8') for i in range(2)]
+    frame_label = [np.zeros(dv_shape[:2], dtype='int8') for i in range(2)]
+    prop_masks = [{name: np.empty(dv_shape[:2], dtype='uint8') for name in props.keys()} for i in range(2)]
 
-    # load original DV event data
-    event_file = tables.open_file(event_file_name, mode='r')
-    event_iter = {}
-    event_iter['timestamp'] = event_file.root.timestamp.iterrows()
-    event_iter['polarity'] = event_file.root.polarity.iterrows()
-    event_iter['xy_distorted'] = event_file.root.xy_distorted.iterrows()
-    event_iter['xy_undistorted'] = event_file.root.xy_undistorted.iterrows()
+    # load raw DV event data
+    raw_event_file = []
+    raw_event_iter = []
+    for i in range(2):
+        e_file = tables.open_file(raw_event_file_name[i], mode='r')
+        e_iter = {}
+        e_iter[f'timestamp_{i}'] = e_file.root.timestamp.iterrows()
+        e_iter[f'polarity_{i}'] = e_file.root.polarity.iterrows()
+        e_iter[f'xy_distorted_{i}'] = e_file.root.xy_distorted.iterrows()
+        e_iter[f'xy_undistorted_{i}'] = e_file.root.xy_undistorted.iterrows()
+        raw_event_file.append(e_file)
+        raw_event_iter.append(e_iter)
 
-    # load original DV frame data
-    frame_file = tables.open_file(frame_file_name, mode='r')
-    frame_iter = {}
-    frame_iter['timestamp'] = frame_file.root.timestamp.iterrows()
-    frame_iter['image_distorted'] = frame_file.root.image_distorted.iterrows()
-    frame_iter['image_undistorted'] = frame_file.root.image_undistorted.iterrows()
+    # load raw DV frame data
+    raw_frame_file = []
+    raw_frame_iter = []
+    for i in range(2):
+        f_file = tables.open_file(raw_frame_file_name[i], mode='r')
+        f_iter = {}
+        f_iter[f'timestamp_{i}'] = f_file.root.timestamp.iterrows()
+        f_iter[f'image_distorted_{i}'] = f_file.root.image_distorted.iterrows()
+        f_iter[f'image_undistorted_{i}'] = f_file.root.image_undistorted.iterrows()
+        raw_frame_file.append(f_file)
+        raw_frame_iter.append(f_iter)
 
-    # load processed Vicon data file
-    processed_vicon_file = tables.open_file(processed_vicon_file_name, mode='r')
-    processed_vicon_iter = {}
-    processed_vicon_iter['timestamp'] = processed_vicon_file.root.timestamp.iterrows()
-    processed_vicon_iter['extrapolated'] = {}
-    processed_vicon_iter['rotation'] = {}
-    processed_vicon_iter['translation'] = {}
-    for prop in processed_vicon_file.root.props:
+    # load final Vicon data file
+    final_vicon_file = tables.open_file(final_vicon_file_name, mode='r')
+    final_vicon_iter = {}
+    final_vicon_iter['timestamp'] = final_vicon_file.root.timestamp.iterrows()
+    final_vicon_iter['extrapolated'] = {}
+    final_vicon_iter['rotation'] = {}
+    final_vicon_iter['translation'] = {}
+    for prop in final_vicon_file.root.props:
         prop_name = prop._v_name
-        processed_vicon_iter['extrapolated'][prop_name] = prop.extrapolated.iterrows()
-        processed_vicon_iter['rotation'][prop_name] = prop.rotation.iterrows()
-        processed_vicon_iter['translation'][prop_name] = {}
+        final_vicon_iter['extrapolated'][prop_name] = prop.extrapolated.iterrows()
+        final_vicon_iter['rotation'][prop_name] = prop.rotation.iterrows()
+        final_vicon_iter['translation'][prop_name] = {}
         for marker in prop.translation:
             marker_name = marker.name
-            processed_vicon_iter['translation'][prop_name][marker_name] = marker.iterrows()
+            final_vicon_iter['translation'][prop_name][marker_name] = marker.iterrows()
 
-    # create processed DV event and frame data files
-    processed_event_data = create_processed_event_file(f_name=processed_event_file_name)
-    processed_frame_data = create_processed_frame_file(f_name=processed_frame_file_name)
+    # create final DV event and frame data files
+    final_event_file, final_event_data = create_event_file(final_event_file_name)
+    final_frame_file, final_frame_data = create_frame_file(final_frame_file_name)
 
-    # initialise video recordings
-    event_image_video_file = cv2.VideoWriter(
-        event_image_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
-        30, dv_shape[1::-1])
-    frame_image_video_file = cv2.VideoWriter(
-        event_frame_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
-        30, dv_shape[1::-1])
+    # # initialise video recordings
+    # event_video_file = [cv2.VideoWriter(file_name, cv2.VideoWriter_fourcc(*'MJPG'), 30, dv_shape[1::-1])
+    #                     for file_name in event_video_file_name]
+    # frame_video_file = [cv2.VideoWriter(file_name, cv2.VideoWriter_fourcc(*'MJPG'), 30, dv_shape[1::-1])
+    #                     for file_name in frame_video_file_name]
 
     # get Vicon frames
-    vicon_old = get_next_vicon(processed_vicon_iter)
-    vicon = get_next_vicon(processed_vicon_iter)
+    vicon_old = get_next_vicon(final_vicon_iter)
+    vicon = get_next_vicon(final_vicon_iter)
     vicon_midway = vicon_old['timestamp'] / 2 + vicon['timestamp'] / 2
 
     # catch up DV events
-    event = get_next_event(event_iter)
-    while event['timestamp'] < vicon_midway:
-        event = get_next_event(event_iter)
+    event = [get_next_event(raw_event_iter[i], i) for i in range(2)]
+    for i in range(2):
+        while event[i][f'timestamp_{i}'] < vicon_midway:
+            event[i] = get_next_event(raw_event_iter[i], i)
 
     # catch up DV frames
-    frame = get_next_frame(frame_iter)
-    while frame['timestamp'] <= vicon['timestamp']:
-        frame = get_next_frame(frame_iter)
+    frame = [get_next_frame(raw_frame_iter[i], i) for i in range(2)]
+    for i in range(2):
+        while frame[i][f'timestamp_{i}'] <= vicon['timestamp']:
+            frame[i] = get_next_frame(raw_frame_iter[i], i)
 
 
     # === MAIN LOOP ===
-    done_event = False
-    done_frame = False
-    while not done_event or not done_frame:
+    done_event = [False, False]
+    done_frame = [False, False]
+    while not all(done_event) or not all(done_frame):
 
         try:
-            vicon_new = get_next_vicon(processed_vicon_iter)
+            vicon_new = get_next_vicon(final_vicon_iter)
             vicon_midway = vicon['timestamp'] / 2 + vicon_new['timestamp'] / 2
         except StopIteration:
             break
@@ -662,10 +672,11 @@ def projection():
         print('Vicon frame timestamp: ', vicon['timestamp'])
 
         for prop_name in props.keys():
-            print('extrapolated:', next(processed_vicon_iter['extrapolated'][prop_name]))
+            print('extrapolated:', next(final_vicon_iter['extrapolated'][prop_name]))
 
             # compute new prop mask
-            prop_masks[prop_name].fill(0)
+            for i in range(2):
+                prop_masks[i][prop_name].fill(0)
 
             # get mesh and Vicon marker translations for this prop
             x = np.array(list(props[prop_name].values()))
@@ -685,137 +696,151 @@ def projection():
             # transform STL mesh space to Vicon space, then
             # transform from Vicon space to DV camera space
             vicon_space_p = np.matmul(mesh[prop_name].vectors, vicon_space_coefficients) + vicon_space_constants
-            dv_space_p = vicon_to_dv_2(dv_space_transform, vicon_space_p.T)
-            dv_space_p_int = np.rint(dv_space_p).astype('int32')
+            dv_space_p = [vicon_to_dv(dv_space_transform[i], vicon_space_p.T) for i in range(2)]
+            dv_space_p_int = [np.rint(p).astype('int32') for p in dv_space_p]
 
             # compute prop mask
-            cv2.fillPoly(prop_masks[prop_name], dv_space_p_int, 255)
-            prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
-            prop_masks[prop_name] = cv2.dilate(prop_masks[prop_name], prop_mask_dilation_kernel)
+            for i in range(2):
+                cv2.fillPoly(prop_masks[i][prop_name], dv_space_p_int[i], 255)
+                prop_masks[i][prop_name] = cv2.dilate(prop_masks[i][prop_name], prop_mask_dilation_kernel)
 
 
 
         # process DV frames
-        if not done_frame:
+        for i in range(2):
+            if not done_frame[i]:
 
-            if frame['timestamp'] <= vicon['timestamp']:
+                while frame[i][f'timestamp_{i}'] <= vicon['timestamp']:
+                    image = frame_image[i]
+                    label = frame_label[i]
 
-                # mask DV frame image
-                frame_image[:, :, :] = frame['image_undistorted']
-                for prop_name in props.keys():
-                    prop_mask = prop_masks[prop_name].astype('bool')
-                    frame_image[prop_mask, :] = blue
+                    # mask DV frame image
+                    image[:, :, :] = frame[i][f'image_undistorted_{i}']
+                    for prop_name in props.keys():
+                        mask = prop_masks[i][prop_name].astype('bool')
+                        image[mask, :] = blue
 
-                # get frame label
-                frame_label.fill(0)
-                for i in range(len(props)):
-                    prop_name = list(props)[i]
-                    prop_mask = prop_masks[prop_name].astype('bool')
-                    frame_label[frame_label != 0 & prop_mask] = -1 # ambiguous label
-                    frame_label[frame_label == 0 & prop_mask] = i # prop label
+                    # get frame label
+                    label.fill(0)
+                    for j in range(len(props)):
+                        prop_name = list(props)[j]
+                        mask = prop_masks[i][prop_name].astype('bool')
+                        label[label != 0 & mask] = -1 # ambiguous label
+                        label[label == 0 & mask] = j # prop label
 
-                # record processed frame data
-                processed_frame_data['timestamp'].append([frame['timestamp']])
-                processed_frame_data['image_distorted'].append([frame['image_distorted']])
-                processed_frame_data['image_undistorted'].append([frame['image_undistorted']])
-                processed_frame_data['label'].append([frame_label])
+                    # record final frame data
+                    final_frame_data[f'timestamp_{i}'].append([frame[i][f'timestamp_{i}']])
+                    final_frame_data[f'image_distorted_{i}'].append([frame[i][f'image_distorted_{i}']])
+                    final_frame_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
+                    final_frame_data[f'label_{i}'].append([label])
 
-                # write and show DV frame image
-                frame_image_video_file.write(frame_image)
-                cv2.imshow('frame image', frame_image)
-                k = cv2.waitKey(1)
-                if k == ord('q'):
-                    cv2.destroyWindow('frame image')
-                    done_frame = True
+                    # # write DV frame video
+                    # frame_video_file[i].write(image)
 
-                while frame['timestamp'] <= vicon['timestamp']:
+                    # show DV frame image
+                    cv2.imshow('frame image', image)
+                    k = cv2.waitKey(1)
+                    if k == ord('q'):
+                        cv2.destroyWindow('frame image')
+                        done_frame[i] = True
+
                     try:
-                        frame = get_next_frame(frame_iter)
+                        frame[i] = get_next_frame(raw_frame_iter[i], i)
                     except StopIteration:
-                        done_frame = True
+                        done_frame[i] = True
                         break
 
 
 
         # process DV events
-        if not done_event:
-            event_pos.fill(0)
-            event_neg.fill(0)
+        for i in range(2):
+            if not done_event[i]:
 
-            while event['timestamp'] < vicon_midway:
+                image = event_image[i]
+                pos = event_pos[i]
+                neg = event_neg[i]
 
-                # check DV event is in frame
-                bounded_x = 0 <= event['xy_undistorted'][0] < dv_shape[1]
-                bounded_y = 0 <= event['xy_undistorted'][1] < dv_shape[0]
+                pos.fill(0)
+                neg.fill(0)
 
-                if bounded_x and bounded_y:
-                    if event['polarity']:
-                        event_pos[event['xy_undistorted'][1], event['xy_undistorted'][0]] += 1
+                while event[i]['timestamp'] < vicon_midway:
+                
+                    # check DV event is in frame
+                    bounded_x = 0 <= event[i][f'xy_undistorted_{i}'][0] < dv_shape[1]
+                    bounded_y = 0 <= event[i][f'xy_undistorted_{i}'][1] < dv_shape[0]
+
+                    if bounded_x and bounded_y:
+                        if event[i][f'polarity_{i}']:
+                            pos[event[f'xy_undistorted_{i}'][1], event[f'xy_undistorted_{i}'][0]] += 1
+                        else:
+                            neg[event[f'xy_undistorted_{i}'][1], event[f'xy_undistorted_{i}'][0]] += 1
+
+                        # get event label
+                        label = 0
+                        for j in range(len(props)):
+                            prop_name = list(props)[j]
+                            mask = prop_masks[prop_name].astype('bool')
+                            if mask[event[i][f'xy_undistorted_{i}'][1], event[i][f'xy_undistorted_{i}'][0]]:
+                                if label != 0:
+                                    label = -1 # ambiguous label
+                                    break
+                                label = j # prop label
+
+                        # record final event data
+                        final_event_data[f'timestamp_{i}'].append([event[f'timestamp_{i}']])
+                        final_event_data[f'polarity_{i}'].append([event[f'polarity_{i}']])
+                        final_event_data[f'xy_distorted_{i}'].append([event[f'xy_distorted_{i}']])
+                        final_event_data[f'xy_undistorted_{i}'].append([event[f'xy_undistorted_{i}']])
+                        final_event_data[f'label_{i}'].append([label])
+
+                    try:
+                        event[i] = get_next_event(raw_event_iter[i], i)
+                    except StopIteration:
+                        done_event[i] = True
+                        break
+
+
+                # fill DV event image with events, then mask it
+                image.fill(0)
+                for prop_name in props.keys():
+                    mask = prop_masks[prop_name].astype('bool')
+                    image[mask] = grey # show prop mask?
+                    if event_distinguish_polarity:
+                        mask_neg = neg > pos
+                        image[(mask_neg & ~mask)] = green
+                        image[(mask_neg & mask)] = blue
+                        mask_pos = pos > neg
+                        image[(mask_pos & ~mask)] = red
+                        image[(mask_pos & mask)] = yellow
                     else:
-                        event_neg[event['xy_undistorted'][1], event['xy_undistorted'][0]] += 1
+                        mask_pos_neg = neg.astype('bool') | pos.astype('bool')
+                        image[(mask_pos_neg & ~mask)] = green
+                        image[(mask_pos_neg & mask)] = red
 
-                    # get event label
-                    label = 0
-                    for i in range(len(props)):
-                        prop_name = list(props)[i]
-                        prop_mask = prop_masks[prop_name].astype('bool')
-                        if prop_mask[event['xy_undistorted'][1], event['xy_undistorted'][0]]:
-                            if label != 0:
-                                label = -1 # ambiguous label
-                                break
-                            label = i # prop label
+                # # write DV event video
+                # event_video_file[i].write(image)
 
-                    # record processed event data
-                    processed_event_data['timestamp'].append([event['timestamp']])
-                    processed_event_data['polarity'].append([event['polarity']])
-                    processed_event_data['xy_distorted'].append([event['xy_distorted']])
-                    processed_event_data['xy_undistorted'].append([event['xy_undistorted']])
-                    processed_event_data['label'].append([label])
+                # show DV event image
+                cv2.imshow('event image', image)
+                k = cv2.waitKey(1)
+                if k == ord('q'):
+                    cv2.destroyWindow('event image')
+                    done_event[i] = True
 
-                try:
-                    event = get_next_event(event_iter)
-                except StopIteration:
-                    done_event = True
-                    break
+            vicon_old = vicon
+            vicon = vicon_new
 
 
-            # fill DV event image with events, then mask it
-            event_image.fill(0)
-            for prop_name in props.keys():
-                prop_mask = prop_masks[prop_name].astype('bool')
-                event_image[prop_mask] = grey # show prop mask?
-                if event_distinguish_polarity:
-                    event_mask_neg = event_neg > event_pos
-                    event_image[(event_mask_neg & ~prop_mask)] = green
-                    event_image[(event_mask_neg & prop_mask)] = blue
-                    event_mask_pos = event_pos > event_neg
-                    event_image[(event_mask_pos & ~prop_mask)] = red
-                    event_image[(event_mask_pos & prop_mask)] = yellow
-                else:
-                    event_mask = event_neg.astype('bool') | event_pos.astype('bool')
-                    event_image[(event_mask & ~prop_mask)] = green
-                    event_image[(event_mask & prop_mask)] = red
 
-            # write and show DV event image
-            event_image_video_file.write(event_image)
-            cv2.imshow('event image', event_image)
-            k = cv2.waitKey(1)
-            if k == ord('q'):
-                cv2.destroyWindow('event image')
-                done_event = True
+    # cleanup
+    for i in range(2):
+        raw_event_file[i].close()
+        raw_frame_file[i].close()
+    final_vicon_file.close()
 
-        vicon_old = vicon
-        vicon = vicon_new
-
-
-    event_image_video_file.release()
-    frame_image_video_file.release()
-
-    event_file.close()
-    frame_file.close()
-    processed_event_file.close()
-    processed_frame_file.close()
-    processed_vicon_file.close()
+    # for i in range(2):
+    #     event_video_file[i].release()
+    #     frame_video_file[i].release()
 
     return
 
