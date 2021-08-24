@@ -17,7 +17,7 @@ from calibrate_projection import vicon_to_camera_centric_2
 
 
 def get_events(address, port, record_time, camera_matrix, distortion_coefficients,
-               f_name='./data/event.h5'):
+               f_name='./data/raw_event.h5'):
     f = tables.open_file(f_name, mode='w')
     f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     f_polarity = f.create_earray(f.root, 'polarity', tables.atom.BoolAtom(), (0,))
@@ -47,7 +47,7 @@ def get_events(address, port, record_time, camera_matrix, distortion_coefficient
 
 
 def get_frames(address, port, record_time, camera_matrix, distortion_coefficients,
-               f_name='./data/frame.h5'):
+               f_name='./data/raw_frame.h5'):
     f = tables.open_file(f_name, mode='w')
     f_timestamp = f.create_earray(f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     f_image_distorted = f.create_earray(f.root, 'image_distorted', tables.atom.UInt8Atom(), (0, 260, 346, 3))
@@ -75,7 +75,7 @@ def get_frames(address, port, record_time, camera_matrix, distortion_coefficient
 
 
 def get_vicon(address, port, record_time, props,
-              f_name='./data/pose.h5'):
+              f_name='./data/raw_pose.h5'):
 
     from vicon_dssdk import ViconDataStream
 
@@ -211,7 +211,7 @@ def get_next_vicon(vicon_iter, usec_offset=0):
     return vicon
 
 
-def create_processed_event_file(f_name='./data/processed_event.h5'):
+def create_processed_event_file(f_name='./data/event.h5'):
     if os.path.exists(f_name):
         os.remove(f_name)
 
@@ -232,7 +232,7 @@ def create_processed_event_file(f_name='./data/processed_event.h5'):
     return data
 
 
-def create_processed_frame_file(f_name='./data/processed_frame.h5'):
+def create_processed_frame_file(f_name='./data/frame.h5'):
     if os.path.exists(f_name):
         os.remove(f_name)
 
@@ -251,7 +251,7 @@ def create_processed_frame_file(f_name='./data/processed_frame.h5'):
     return data
 
 
-def create_processed_vicon_file(props, f_name='./data/processed_vicon.h5'):
+def create_processed_vicon_file(props, f_name='./data/vicon.h5'):
     if os.path.exists(f_name):
         os.remove(f_name)
 
@@ -290,7 +290,11 @@ def projection():
 
     record = False
     test_scenario = 'no_human'
-    test_number = 7
+    test_number = 0
+
+    path_camera_calib = './camera_calibration'
+    path_projection_calib = './projection_calibration'
+    path_data = f'./data/{test_scenario}/{test_number:04}'
 
     record_seconds = 10
     record_time = record_seconds * 1000000
@@ -311,11 +315,6 @@ def projection():
 
     vicon_address, vicon_port = '127.0.0.1', 801
     dv_address, event_port, frame_port = '127.0.0.1', 36000, 36001
-
-    path_camera_calib = './camera_calibration'
-    path_projection_calib = './projection_calibration'
-    path_data = './data'
-
 
     props = {}
     mesh = {}
@@ -358,18 +357,20 @@ def projection():
 
     # === DATA FILES ===
 
-    os.makedirs(f'{path_data}/{test_scenario}/{test_number:04}', exist_ok=True)
+    os.makedirs(path_data, exist_ok=True)
+    for f in os.listdir(path_data):
+        os.remove(path_data + f)
 
-    event_image_video_file_name = f'{path_data}/{test_scenario}/{test_number:04}/event_image_video.avi'
-    event_frame_video_file_name = f'{path_data}/{test_scenario}/{test_number:04}/frame_image_video.avi'
+    event_image_video_file_name = f'{path_data}/event_image_video.avi'
+    event_frame_video_file_name = f'{path_data}/frame_image_video.avi'
 
-    event_file_name = f'{path_data}/{test_scenario}/{test_number:04}/raw_event.h5'
-    frame_file_name = f'{path_data}/{test_scenario}/{test_number:04}/raw_frame.h5'
-    vicon_file_name = f'{path_data}/{test_scenario}/{test_number:04}/raw_pose.h5'
+    event_file_name = f'{path_data}/raw_event.h5'
+    frame_file_name = f'{path_data}/raw_frame.h5'
+    vicon_file_name = f'{path_data}/raw_pose.h5'
 
-    processed_event_file_name = f'{path_data}/{test_scenario}/{test_number:04}/event.h5'
-    processed_frame_file_name = f'{path_data}/{test_scenario}/{test_number:04}/frame.h5'
-    processed_vicon_file_name = f'{path_data}/{test_scenario}/{test_number:04}/pose.h5'
+    processed_event_file_name = f'{path_data}/event.h5'
+    processed_frame_file_name = f'{path_data}/frame.h5'
+    processed_vicon_file_name = f'{path_data}/pose.h5'
 
 
 
@@ -587,14 +588,6 @@ def projection():
     frame_label = np.zeros(dv_shape[:2], dtype='int8')
     prop_masks = {name: np.empty(dv_shape[:2], dtype='uint8') for name in props.keys()}
 
-    # initialise video recordings
-    event_image_video_file = cv2.VideoWriter(
-        event_image_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
-        30, dv_shape[1::-1])
-    frame_image_video_file = cv2.VideoWriter(
-        event_frame_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
-        30, dv_shape[1::-1])
-
     # load original DV event data
     event_file = tables.open_file(event_file_name, mode='r')
     event_iter = {}
@@ -629,6 +622,14 @@ def projection():
     # create processed DV event and frame data files
     processed_event_data = create_processed_event_file(f_name=processed_event_file_name)
     processed_frame_data = create_processed_frame_file(f_name=processed_frame_file_name)
+
+    # initialise video recordings
+    event_image_video_file = cv2.VideoWriter(
+        event_image_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
+        30, dv_shape[1::-1])
+    frame_image_video_file = cv2.VideoWriter(
+        event_frame_video_file_name, cv2.VideoWriter_fourcc(*'MJPG'),
+        30, dv_shape[1::-1])
 
     # get Vicon frames
     vicon_old = get_next_vicon(processed_vicon_iter)
