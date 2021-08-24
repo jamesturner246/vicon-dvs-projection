@@ -2,8 +2,59 @@
 
 \usepackage{amsmath}
 \usepackage{graphicx}
+\usepackage{listings}
 
 \begin{document}
+
+\section{Dataset Structure}
+The dataset consists of 15 second recordings of pixelwise labelled RGB frames and labelled DVS events, with accompanying pose information. Data is recorded using two iniVation DAVIS 346 neuromorphic DVS cameras, which enable the simultaneous capture of binocular RGB frames and binocular pixelwise brightness changing `events'. The recordings can be categorised into various prop scenarios, in which various tool props are interacted with to varying degrees. In the first scenario, individual tool props are suspended using transparent fishing line, and perturbed in view of the cameras. In the second scenario, multiple tool props are suspended and perturbed in view of the cameras. In the third scenario, one or more tool props are held and interacted with by a human in view of the cameras. The data from each prop scenario is further categorised by the type of data contained within. Thanks to the use of iniVation DAVIS 346 cameras, our method allows the simultaneous generation of labelled RGB frame data and visual event data, so both types are included in the dataset.
+
+Recorded data directories take the form \lstinline|./data/<category>/<sample #>|. Each directory contains three HDF5 files containing segmented RGB frames, segmented DVS events and prop pose information. For each recording, both raw and undistorted (after lens distortion correction) data is saved. RGB frame and visual event labels are integers, with $0$ meaning `background', $-1$ meaning `ambiguous' (multiple props overlap) and any $i > 0$ denoting class $i$. The fields of the RGB frame file \lstinline|frame.h5| are as follows, where $i \in \{1,...,n\}$ and $n = 2$ is the number of cameras:
+\begin{center}
+	\begin{tabular}{|c|c|}
+		timestamp\_$i$           & frame timestamp (camera $i$) \\
+		image\_$i$\_distorted    & frame before distortion correction (camera $i$) \\
+		image\_$i$\_undistorted  & frame after distortion correction (camera $i$) \\
+		label\_$i$               & pixelwise frame label (camera $i$) \\
+	\end{tabular}
+\end{center}
+The fields of the visual event file \lstinline|event.h5| are as follows:
+\begin{center}
+	\begin{tabular}{|c|c|}
+		timestamp\_$i$        & event timestamp (camera $i$) \\
+		polarity\_$i$         & event polarity (camera $i$) \\
+		xy\_distorted\_$i$    & event $x$ and $y$ before distortion correction (camera $i$) \\
+		xy\_undistorted\_$i$  & event $x$ and $y$ after distortion correction (camera $i$) \\
+		label\_$i$            & event label (camera $i$) \\
+	\end{tabular}
+\end{center}
+Prop pose information, including translation and rotation (respectively millimetres and degrees) are stored as floating-point numbers for both global 3D tracking coordinates and camera-centric coordinates. Floating-point not-a-number indicates bad or missing data. The fields of the prop pose file \lstinline|pose.h5| are as follows:
+\begin{center}
+	\begin{tabular}{|c|c|}
+		timestamp                           & pose timestamp \\
+		extrapolated[$p$]                   & true when the pose of prop $p$ was extrapolated \\
+		rotation[$p$]                       & prop $p$ rotation in global coordinates \\
+		camera\_rotation\_i[$p$]            & prop $p$ rotation relative to camera $i$ \\
+		translation[$p$][$m$]               & prop $p$ marker $m$ translation in global coordinates \\
+		camera\_translation\_$i$[$p$][$m$]  & prop $p$ marker $m$ translation relative to camera $i$ \\
+	\end{tabular}
+\end{center}
+
+For the sake of reproducibility, each recorded data directory also contains a JSON file linking the data to a set of OpenCV camera calibration data and calibrated Vicon to camera projection matrices which were used when collecting the data. The calibration procedure is discussed in the next section. These files are respectively held separately in directories of the form \lstinline|./camera_calibration/<date_time>| and \lstinline|./projection_calibration/<date_time>|.
+
+
+\section{Calibration Procedure}
+Our method uses a combination of eight Vicon Vero 2.2 tracking cameras and two iniVation DAVIS 346 DVS cameras, which are calibrated such that Vicon positions and orientations are projected accurately onto the 2D DVS image plane.To achieve this, we developed a semi-automated calibration procedure to find the translation and rotation matrices which best fit an initial trial set of synchronised Vicon and DVS data. The setup and calibration procedure of our method will be explained in this section.
+
+We begin by discussing the issues of recording DVS event data with 3D tracking systems. A given Vicon 3D tracking system, like many other systems, works by emitting high frequency near-infrared (NIR) pulses from it's tracking cameras, and triangulating the position of returned NIR light from reflective markers. Using three or more of such markers on a single prop, the tracking system can disambiguate the orientation of the prop, providing pose information (translation and rotation). On the other hand, neuromorphic DVS cameras detect dynamic scenes by signalling changes in brightness on a per-pixel basis, enabling very low power/latency operation. Since the Vicon tracking system, by design, uses dynamic changes in NIR light to operate, it is non-trivial to use such a system in combination with DVS cameras which measure changes in brightness. To work around this issue, we manufactured a set of tracker props with built-in NIR LEDs of similar wavelength to the 780 nm light used by our Vicon tracking system. All recordings were then made with the Vicon system's NIR pulsing disabled. We eliminate the NIR light from the DVS images by attaching NIR-cut filters to the lenses.
+
+After calibrating the DVS camera lenses (discussed later) and 3D tracking system, we begin by simultaneously collecting $100$ translation vectors from the 3D tracking system and $10000$ visual events from the DVS cameras samples of a stationary prop with 780 nm LED markers. The markers must strobe to ensure that both the tracking system and the DVS cameras can detect them (we use the Vicon Active Wand v2 NIR calibration wand set to strobe mode for this). We chose the 3D tracker marker coordinates to be the median of the Vicon translation vectors for each of the $m$ markers, and chose the 2D camera coordinates to be the centroids of a k-means clustering on the recorded DVS events with $k = m$. The DVS event k-means centroid computation was improved by filtering events through a threshold mask eroded by three pixels and dilated by ten pixels to remove noise. We then use nonlinear optimisation to compute the optimal transformation from the 3D tracking coordinates to the 2D camera plane coordinates (discussed in the next section).
+
+Using this computed transformation, we use the numpy-stl library to project the STL mesh of the prop onto the DVS camera image plane, based on the 3D tracking system's prop translation vector, to create a segmentation mask for both RGB image and DVS event data. This approach is similar to that used by \cite{????}, however in our method we directly project the prop's STL mesh onto the camera plane, rather than the 3D prop scanned prop method used therein. While our method circumvents the need for 3D scanning hardware, some manual work is required to design and assemble accurate LED marker props with power sources. This prop label mask can be slightly dilated to fully cover the prop if rounding and calibration errors cause the mask to not fully cover the prop. During projection of the prop mesh, `bad' frames are identified on a per-prop basis by comparing the last known position and orientation to the current one, and failing if the difference is above a configurable threshold. Bad 3D tracking pose information and label masks are then linearly extrapolated, based on a configurable number of last `good' frames. While the majority of bad frames are smoothed out using this method, the prop poses and label masks are respectively set to not-a-number and all zero for the remaining larger jitters.
+
+The tracker props we designed are available online \cite{???} in FreeCAD and STL mesh format. The code for the projection calibration procedure is available online at \cite{????}.
+
+
 \section{Vicon coordinate to DVS camera transform}
 Our approach has been to do two calibrations:
 \begin{enumerate}
@@ -56,4 +107,6 @@ Figure \ref{figure3} illustrates the result which has error RMS$= 13.56$.
 
 \subsection{Camera-centric pose estimation}
 With these results it appears reasonable to try to use the camera calibration method also in the context of pose estimation relative to camera coordinates. For this purpose one would use the rotation+translation method and then use the determined rotation and translation without the projection stage to transform vicon positions into camera-centric positions. To transform Euler angles for the tool pose, we need to simply combine the Euler angles defining the pose and the Euler angles of the vicon-to-camera rotation.
+
+
 \end{document}

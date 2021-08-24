@@ -1,4 +1,3 @@
-#!/bin/env python3
 
 import os
 import time
@@ -344,17 +343,87 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
     return coordinates
 
 
+def vicon_to_dv_1(m, v):
+    if v.ndim == 1:
+        v = v[np.newaxis].T
+
+    z = vicon_to_camera_centric_1(m, v)
+    z[:2] *= (1.0 / z[2]) * 4      # focal length 4 mm
+    z = z[:2]
+    z /= 1.8e-2                    # 18 micrometer/pixel = 1.8e-2 mm/pixel
+    z += [[173], [130]]            # add the origin offset from image centre to top left corner explicitly
+
+    return z
+
+
+def vicon_to_camera_centric_1(m, v):
+    M = np.reshape(m[:9], (3, 3))
+    z = np.dot(M, v)               # apply the rotation to get into the camera orientation frame
+    z += m[9:12, np.newaxis] * 10  # add the translation (using cm for a better scale of fitting)
+    return z
+
+
+def vicon_to_dv_2(m, v):
+    if v.ndim == 1:
+        v = v[np.newaxis].T
+
+    z = vicon_to_camera_centric_2(m, v)
+    z[:2] *= (1.0 / z[2]) * 4 * m[6]  # focal length 4 mm
+    z = z[:2]
+    z /= 1.8e-2                       # 18 micrometer/pixel = 1.8e-2 mm/pixel
+    z[0] *= m[7]                      # allow for some rescaling of x due to the camera undistortion method
+    z += [[173], [130]]               # add the origin offset from image centre to top left corner explicitly
+    return z
+
+
+def vicon_to_camera_centric_2(m, v):
+    M = euler_angles_to_rotation_matrix(m)
+    z = np.dot(M, v)                  # apply the rotation to get into the camera orientation frame
+    z += m[3:6, np.newaxis] * 10      # add the translation (using cm for a better scale of fitting)
+    return z
+
+
+def euler_angles_to_rotation_matrix(m):
+    M = np.array([
+        [np.cos(m[0]), -np.sin(m[0]), 0],
+        [np.sin(m[0]), np.cos(m[0]), 0],
+        [0, 0, 1]])
+    M = np.dot(np.array([
+        [1, 0, 0],
+        [0, np.cos(m[1]), -np.sin(m[1])],
+        [0, np.sin(m[1]), np.cos(m[1])]]), M)
+    M = np.dot(np.array([
+        [np.cos(m[2]), -np.sin(m[2]), 0],
+        [np.sin(m[2]), np.cos(m[2]), 0],
+        [0, 0, 1]]), M)
+    return M
+
+
+def err_fun(m, vicon_p, dv_p):
+    assert dv_p.shape[0] == vicon_p.shape[0]
+
+    error = 0.0
+    for v, d in zip(vicon_p, dv_p):
+        output = vicon_to_dv(m, v)
+        difference = output - d
+        error += np.dot(difference, difference)
+
+    return np.sqrt(error)
+
+
 def calibrate():
 
     n_epoch = 20
 
-    method = 1
+    calibrate_projection_method = 2
 
     reuse = False
     debug = False
     test = True
 
     path = './calibration'
+    path_camera_calib = './camera_calibration'
+    path_projection_calib = './projection_calibration'
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -371,8 +440,8 @@ def calibrate():
         os.makedirs(path, exist_ok=True)
 
     # DV camera calibration
-    dv_camera_matrix = np.load('./calibration/camera_matrix.npy')
-    dv_distortion_coefficients = np.load('./calibration/camera_distortion_coefficients.npy')
+    dv_camera_matrix = np.load(f'{path_camera_calib}/camera_matrix.npy')
+    dv_distortion_coefficients = np.load(f'{path_camera_calib}/camera_distortion_coefficients.npy')
 
     # DV
     dv_address, dv_event_port, dv_frame_port = '127.0.0.1', 36000, 36001
@@ -416,32 +485,9 @@ def calibrate():
 
     #########################################################################
 
-    if method == 1:
-
-        def vicon_to_dv(m, v):
-            z = vicon_to_camera_centric(m, v)
-            z *= (1.0 / z[2]) * 4  # focal length 4 mm
-            z = z[:2]
-            z /= 1.8e-2            # 18 micrometer/pixel = 1.8e-2 mm/pixel
-            z += [173, 130]        # add the origin offset from image centre to top left corner explicitly
-            return z
-
-        def vicon_to_camera_centric(m, v):
-            M = np.reshape(m[:9], (3, 3))
-            z = np.dot(M, v)       # apply the rotation to get into the camera orientation frame
-            z += m[9:12] * 10      # add the translation (using cm for a better scale of fitting)
-            return z
-
-        def err_fun(m, vicon_p, dv_p):
-            assert dv_p.shape[0] == vicon_p.shape[0]
-
-            error = 0.0
-            for v, d in zip(vicon_p, dv_p):
-                output = vicon_to_dv(m, v)
-                difference = output - d
-                error += np.dot(difference, difference)
-
-            return np.sqrt(error)
+    if calibrate_projection_method == 1:
+        vicon_to_dv = vicon_to_dv_1
+        vicon_to_camera_centric = vicon_to_camera_centric_1
 
         # Vicon to DV transformation
         m_file = './calibration/bootstrap_dv_space_transform.npy'
@@ -458,7 +504,7 @@ def calibrate():
         m = result['x']
         print('DV space transform error: ', err_fun(m, x, y))
 
-        m_file = '{path}/dv_space_transform.npy'
+        m_file = f'{path}/dv_space_transform.npy'
         np.save(m_file, m)
 
         print('DV space coefficients')
@@ -467,64 +513,22 @@ def calibrate():
         print(m[9:])
         print()
 
-
-
     #########################################################################
 
-    elif method == 2:
+    elif calibrate_projection_method == 2:
+        vicon_to_dv = vicon_to_dv_2
+        vicon_to_camera_centric = vicon_to_camera_centric_2
 
-        def vicon_to_dv(m, v):
-            z = vicon_to_camera_centric(m, v)
-            z *= (1.0 / z[2]) * 4 * m[6]  # focal length 4 mm
-            z = z[:2]
-            z /= 1.8e-2                   # 18 micrometer/pixel = 1.8e-2 mm/pixel
-            z[0] *= m[7]                  # allow for some rescaling of x due to the camera  undistortion method
-            z += [173, 130]               # add the origin offset from image centre to top left corner explicitly
-            return z
-
-        def vicon_to_camera_centric(m, v):
-            M = the_matrix(m)
-            z = np.dot(M, v)              # apply the rotation to get into the camera orientation frame
-            z += m[3:6] * 10              # add the translation (using cm for a better scale of fitting)
-            return z
-
-        def the_matrix(m):
-            M = np.array([
-                [np.cos(m[0]), -np.sin(m[0]), 0],
-                [np.sin(m[0]), np.cos(m[0]), 0],
-                [0, 0, 1]])
-            M = np.dot(np.array([
-                [1, 0, 0],
-                [0, np.cos(m[1]), -np.sin(m[1])],
-                [0, np.sin(m[1]), np.cos(m[1])]]), M)
-            M = np.dot(np.array([
-                [np.cos(m[2]), -np.sin(m[2]), 0],
-                [np.sin(m[2]), np.cos(m[2]), 0],
-                [0, 0, 1]]), M)
-            return M
-
-        def err_fun(m, vicon_p, dv_p):
-            # the meaning of m is as follows:
-            # 0-2 Euler angles of transform into camera oriented space
-            # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
-            # 6 scale factor for stretch in x-direction due to camera calibration/undistortion
-
-            assert dv_p.shape[0] == vicon_p.shape[0]
-
-            error = 0.0
-            for v, d in zip(vicon_p, dv_p):
-                output = vicon_to_dv(m, v)
-                difference = output - d
-                error += np.dot(difference, difference)
-
-            return np.sqrt(error)
-
+        # the meaning of m is as follows:
+        # 0-2 Euler angles of transform into camera oriented space
+        # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
+        # 6 scale factor for stretch in x-direction due to camera calibration/undistortion
 
         # Vicon to DV transformation
         m = np.empty(8)
-        m[:3] = np.array([3.14, 1.6, 0.0])  # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
-        m[3:6] = np.array([22, 93, 231])  # initial guess for translation from pinhole to vicon origin
-        m[6:8]= [ 1.0, 1.0 ]  # initial guess for the deviation of focal length and x-stretching from camera undistortion
+        m[:3] = [3.14, 1.6, 0.0]  # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
+        m[3:6] = [22.0, 93.0, 231.0]  # initial guess for translation from pinhole to vicon origin (in cm)
+        m[6:8] = [1.0, 1.0]  # initial guess for the deviation of focal length and x-stretching from camera undistortion
         x = np.vstack(vicon_wand_coordinates)
         y = np.vstack(dv_wand_coordinates)
 
@@ -537,21 +541,21 @@ def calibrate():
         m = result['x']
         print('DV space transform error: ', err_fun(m, x, y))
 
-        m_file = '{path}/dv_space_transform.npy'
+        m_file = f'{path}/dv_space_transform.npy'
         np.save(m_file, m)
 
         print("Euler angles: {}".format(m[:3]))
         print("Translation: {}".format(m[3:6]))
         print("focal length and x rescales: {}".format(m[6:]))
-        print("The matrix: {}".format(the_matrix(m)))
+        print("The matrix: {}".format(euler_angles_to_rotation_matrix(m)))
         print()
-
-
 
     #########################################################################
 
     else:
-        raise RuntimeError('invalid method')
+        raise RuntimeError('invalid projection calibration method')
+
+    #########################################################################
 
 
     plt.figure()
