@@ -79,7 +79,6 @@ def create_vicon_file(f_name, props):
         g_prop = f.create_group(g_props, prop_name)
         data['extrapolated'] = f.create_earray(
             g_prop, 'extrapolated', tables.atom.BoolAtom(), (0,))
-
         data['rotation'] = f.create_earray(
             g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
         data['translation'][prop_name] = {}
@@ -87,7 +86,6 @@ def create_vicon_file(f_name, props):
         for marker_name in props[prop_name].keys():
             data['translation'][prop_name] = f.create_earray(
                 g_translation, marker_name, tables.atom.Float64Atom(), (0, 3))
-
         for i in range(2):
             data[f'camera_rotation_{i}'] = f.create_earray(
                 g_prop, f'camera_rotation_{i}', tables.atom.Float64Atom(), (0, 3))
@@ -628,6 +626,12 @@ def projection():
         for marker in prop.translation:
             marker_name = marker.name
             final_vicon_iter['translation'][prop_name][marker_name] = marker.iterrows()
+        for i in range(2):
+            final_vicon_iter[f'camera_rotation_{i}'][prop_name] = prop[f'camera_rotation_{i}'].iterrows()
+            final_vicon_iter[f'camera_translation_{i}'][prop_name] = {}
+            for marker in prop[f'camera_translation_{i}']:
+                marker_name = marker.name
+                final_vicon_iter[f'camera_translation_{i}'][prop_name][marker_name] = marker.iterrows()
 
     # create final DV event and frame data files
     final_event_file, final_event_data = create_event_file(final_event_file_name)
