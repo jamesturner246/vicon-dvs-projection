@@ -174,18 +174,18 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
 
 
 def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name, marker_names,
-                            camera_matrix, distortion_coefficients,
+                            camera, mtx, dist,
                             n_event=10000, frame_shape=(260, 346, 3),
                             reuse=False, debug=False,
                             path='./calibration'):
 
     print('DV coordinates')
 
-    event_t_file = f'{path}/dv_event_t_{i_epoch}.npy'
-    event_p_file = f'{path}/dv_event_p_{i_epoch}.npy'
-    event_xy_distorted_file = f'{path}/dv_event_xy_distorted_{i_epoch}.npy'
-    event_xy_undistorted_file = f'{path}/dv_event_xy_undistorted_{i_epoch}.npy'
-    coordinates_file = f'{path}/dv_coordinates_{i_epoch}.npy'
+    event_timestamp_file = f'{path}/dv_{camera}_event_timestamp_{i_epoch}.npy'
+    event_polarity_file = f'{path}/dv_{camera}_event_polarity_{i_epoch}.npy'
+    event_xy_distorted_file = f'{path}/dv_{camera}_event_xy_distorted_{i_epoch}.npy'
+    event_xy_undistorted_file = f'{path}/dv_{camera}_event_xy_undistorted_{i_epoch}.npy'
+    coordinates_file = f'{path}/dv_{camera}_coordinates_{i_epoch}.npy'
 
     marker_count = len(marker_names)
     erode_dv_kernel = np.ones((3, 3), 'uint8')
@@ -194,13 +194,13 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
     # === COLLECT RAW DATA ===
     if reuse:
-        event_t = np.load(event_t_file)
-        event_p = np.load(event_p_file)
+        event_timestamp = np.load(event_timestamp_file)
+        event_polarity = np.load(event_polarity_file)
         event_xy_distorted = np.load(event_xy_distorted_file)
 
     else:
-        event_t = np.empty((n_event), dtype='uint64')
-        event_p = np.empty((n_event), dtype='bool')
+        event_timestamp = np.empty((n_event), dtype='uint64')
+        event_polarity = np.empty((n_event), dtype='bool')
         event_xy_distorted = np.empty((n_event, 2), dtype='int32')
 
         with dv.NetworkEventInput(address=address, port=event_port) as f:
@@ -212,8 +212,8 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
                     break
 
                 # record and undistort event
-                event_t[i_event] = event.timestamp
-                event_p[i_event] = event.polarity
+                event_timestamp[i_event] = event.timestamp
+                event_polarity[i_event] = event.polarity
                 event_xy_distorted[i_event] = [event.x, event.y]
 
                 i_event += 1
@@ -222,8 +222,8 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
             progress.close()
 
         # save raw data
-        np.save(event_t_file, event_t)
-        np.save(event_p_file, event_p)
+        np.save(event_timestamp_file, event_timestamp)
+        np.save(event_polarity_file, event_polarity)
         np.save(event_xy_distorted_file, event_xy_distorted)
 
 
@@ -234,8 +234,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
     for i_event in range(n_event):
         event_xy_undistorted[i_event] = np.rint(cv2.undistortPoints(
             event_xy_distorted.astype('float64')[i_event],
-            camera_matrix, distortion_coefficients,
-            None, camera_matrix)[0, 0])
+            mtx, dist, None, mtx)[0, 0])
 
         x = event_xy_undistorted[i_event, 0]
         y = event_xy_undistorted[i_event, 1]
@@ -316,7 +315,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
             frame = next(f)
 
         frame_image = cv2.undistort(
-            frame.image, camera_matrix, distortion_coefficients, None, camera_matrix)
+            frame.image, mtx, dist, None, mtx)
 
         # plot markers
         fig, ax = plt.subplots()
@@ -327,6 +326,7 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
         ax.text(coordinates[2, 0], coordinates[2, 1], 'top_right', color='blue')
         ax.text(coordinates[3, 0], coordinates[3, 1], 'middle', color='blue')
         ax.text(coordinates[4, 0], coordinates[4, 1], 'bottom', color='blue')
+        ax.set_title(f'camera {camera}')
         ax.set_ylim([0, frame_shape[0]])
         ax.set_xlim([0, frame_shape[1]])
         ax.invert_yaxis()
@@ -338,16 +338,16 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
     # print DV coordinates
     for i in range(marker_count):
-        print(f'name: {marker_names[i]:<15s} coordinates: {coordinates[i]}')
+        print(f'camera: {camera} name: {marker_names[i]:<15s} coordinates: {coordinates[i]}')
 
     return coordinates
 
 
-def vicon_to_dv_1(m, v):
+def vicon_to_dv_method_1(m, v):
     if v.ndim == 1:
         v = v[np.newaxis].T
 
-    z = vicon_to_camera_centric_1(m, v)
+    z = vicon_to_camera_centric_method_1(m, v)
     z[:2] *= (1.0 / z[2]) * 4      # focal length 4 mm
     z = z[:2]
     z /= 1.8e-2                    # 18 micrometer/pixel = 1.8e-2 mm/pixel
@@ -356,18 +356,18 @@ def vicon_to_dv_1(m, v):
     return z
 
 
-def vicon_to_camera_centric_1(m, v):
+def vicon_to_camera_centric_method_1(m, v):
     M = np.reshape(m[:9], (3, 3))
     z = np.dot(M, v)               # apply the rotation to get into the camera orientation frame
     z += m[9:12, np.newaxis] * 10  # add the translation (using cm for a better scale of fitting)
     return z
 
 
-def vicon_to_dv_2(m, v):
+def vicon_to_dv_method_2(m, v):
     if v.ndim == 1:
         v = v[np.newaxis].T
 
-    z = vicon_to_camera_centric_2(m, v)
+    z = vicon_to_camera_centric_method_2(m, v)
     z[:2] *= (1.0 / z[2]) * 4 * m[6]  # focal length 4 mm
     z = z[:2]
     z /= 1.8e-2                       # 18 micrometer/pixel = 1.8e-2 mm/pixel
@@ -376,7 +376,7 @@ def vicon_to_dv_2(m, v):
     return z
 
 
-def vicon_to_camera_centric_2(m, v):
+def vicon_to_camera_centric_method_2(m, v):
     M = euler_angles_to_rotation_matrix(m)
     z = np.dot(M, v)                  # apply the rotation to get into the camera orientation frame
     z += m[3:6, np.newaxis] * 10      # add the translation (using cm for a better scale of fitting)
@@ -421,9 +421,14 @@ def calibrate():
     debug = False
     test = True
 
+    path_camera = './camera_calibration'
+    path_projection = './projection_calibration'
     path = './calibration'
-    path_camera_calib = './camera_calibration'
-    path_projection_calib = './projection_calibration'
+
+    # make calibration directories
+    os.makedirs(path_projection, exist_ok=True)
+    if not reuse:
+        os.makedirs(path, exist_ok=True)
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -435,25 +440,28 @@ def calibrate():
     ]
     n_marker = len(marker_names)
 
-    # make calibration directory
-    if not reuse:
-        os.makedirs(path, exist_ok=True)
-
-    # DV camera calibration
-    dv_camera_matrix = np.load(f'{path_camera_calib}/camera_matrix.npy')
-    dv_distortion_coefficients = np.load(f'{path_camera_calib}/camera_distortion_coefficients.npy')
-
-    # DV
-    dv_address, dv_event_port, dv_frame_port = '127.0.0.1', 36000, 36001
     dv_frame_shape = (260, 346, 3)
     dv_n_event = 10000
-    dv_wand_coordinates = np.empty((n_epoch, n_marker, 2), dtype='float64')
-
-    # Vicon
-    vicon_address, vicon_port = '127.0.0.1', 801
     vicon_n_frame = 100
     vicon_t_frame = 0.001
+
+    # servers
+    vicon_address, vicon_port = '127.0.0.1', 801
+    dv_address = '127.0.0.1'
+    dv_event_port = [36000, 36001]
+    dv_frame_port = [36002, 36003]
+
+    # DV camera matrix
+    dv_camera_mtx_file_name = [f'{path_camera}/camera_{i}_matrix.npy' for i in range(2)]
+    dv_camera_mtx = [np.load(file_name) for file_name in dv_camera_mtx_file_name]
+
+    # DV camera distortion coefficients
+    dv_camera_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
+    dv_camera_dist = [np.load(file_name) for file_name in dv_camera_dist_file_name]
+
+    # allocate temp memory
     vicon_wand_coordinates = np.empty((n_epoch, n_marker, 3), dtype='float64')
+    dv_wand_coordinates = [np.empty((n_epoch, n_marker, 2), dtype='float64') for i in range(2)]
 
     i_epoch = 0
     while i_epoch < n_epoch:
@@ -466,12 +474,13 @@ def calibrate():
             n_frame=vicon_n_frame, t_frame=vicon_t_frame,
             reuse=reuse, debug=debug, path=path)
 
-        dv_wand_coordinates[i_epoch, :, :] = get_dv_wand_coordinates(
-            i_epoch, dv_address, dv_event_port, dv_frame_port, prop_name, marker_names,
-            dv_camera_matrix, dv_distortion_coefficients,
-            n_event=dv_n_event, frame_shape=dv_frame_shape,
-            reuse=reuse, debug=debug, path=path)
-        
+        for i in range(2):
+            dv_wand_coordinates[i][i_epoch, :, :] = get_dv_wand_coordinates(
+                i_epoch, dv_address, dv_event_port[i], dv_frame_port[i], prop_name, marker_names,
+                i, dv_camera_mtx[i], dv_camera_dist[i],
+                n_event=dv_n_event, frame_shape=dv_frame_shape,
+                reuse=reuse, debug=debug, path=path)
+
         if not reuse:
             accept = ''
             while accept != 'y' and accept != 'n':
@@ -486,38 +495,41 @@ def calibrate():
     #########################################################################
 
     if calibrate_projection_method == 1:
-        vicon_to_dv = vicon_to_dv_1
-        vicon_to_camera_centric = vicon_to_camera_centric_1
+        vicon_to_dv = vicon_to_dv_method_1
+        vicon_to_camera_centric = vicon_to_camera_centric_method_1
 
         # Vicon to DV transformation
-        m_file = './calibration/bootstrap_dv_space_transform.npy'
-        m = np.load(m_file)
+        m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
+        m = [np.load('./calibration/bootstrap_dv_space_transform.npy') for i in range(2)]
         x = np.vstack(vicon_wand_coordinates)
-        y = np.vstack(dv_wand_coordinates)
-
-        print('Original guess has error: ', err_fun(m, x, y))
+        y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
 
         method = 'nelder-mead'
         options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
-        result = minimize(err_fun, m, args=(x, y), method=method, options=options)
 
-        m = result['x']
-        print('DV space transform error: ', err_fun(m, x, y))
+        for i in range(2):
+            err = err_fun(m[i], x, y[i])
+            print(f'camera {i} transform: original guess has error: {err}')
 
-        m_file = f'{path}/dv_space_transform.npy'
-        np.save(m_file, m)
+            result = minimize(err_fun, m[i], args=(x, y[i]), method=method, options=options)
+            m[i] = result['x']
 
-        print('DV space coefficients')
-        print(np.reshape(m[:9], (3, 3)))
-        print('DV space constants')
-        print(m[9:])
-        print()
+            err = err_fun(m[i], x, y[i])
+            print(f'camera {i} transform: final result has error: {err}')
+
+            np.save(m_file[i], m[i])
+
+            print('DV space coefficients')
+            print(np.reshape(m[i][:9], (3, 3)))
+            print('DV space constants')
+            print(m[i][9:])
+            print()
 
     #########################################################################
 
     elif calibrate_projection_method == 2:
-        vicon_to_dv = vicon_to_dv_2
-        vicon_to_camera_centric = vicon_to_camera_centric_2
+        vicon_to_dv = vicon_to_dv_method_2
+        vicon_to_camera_centric = vicon_to_camera_centric_method_2
 
         # the meaning of m is as follows:
         # 0-2 Euler angles of transform into camera oriented space
@@ -525,30 +537,39 @@ def calibrate():
         # 6 scale factor for stretch in x-direction due to camera calibration/undistortion
 
         # Vicon to DV transformation
+        m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
         m = np.empty(8)
-        m[:3] = [3.14, 1.6, 0.0]  # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
-        m[3:6] = [22.0, 93.0, 231.0]  # initial guess for translation from pinhole to vicon origin (in cm)
-        m[6:8] = [1.0, 1.0]  # initial guess for the deviation of focal length and x-stretching from camera undistortion
-        x = np.vstack(vicon_wand_coordinates)
-        y = np.vstack(dv_wand_coordinates)
 
-        print('Original guess has error: ', err_fun(m, x, y))
+        for i in range(2):
+            # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
+            m[i][:3] = [3.14, 1.6, 0.0]
+            # initial guess for translation from pinhole to vicon origin (in cm)
+            m[i][3:6] = [22.0, 93.0, 231.0]
+            # initial guess for the deviation of focal length and x-stretching from camera undistortion
+            m[i][6:8] = [1.0, 1.0]
+        x = np.vstack(vicon_wand_coordinates)
+        y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
 
         method = 'nelder-mead'
         options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
-        result = minimize(err_fun, m, args=(x, y), method=method, options=options)
 
-        m = result['x']
-        print('DV space transform error: ', err_fun(m, x, y))
+        for i in range(2):
+            err = err_fun(m[i], x, y[i])
+            print(f'camera {i} transform: original guess has error: {err}')
 
-        m_file = f'{path}/dv_space_transform.npy'
-        np.save(m_file, m)
+            result = minimize(err_fun, m[i], args=(x, y[i]), method=method, options=options)
+            m = result['x']
 
-        print("Euler angles: {}".format(m[:3]))
-        print("Translation: {}".format(m[3:6]))
-        print("focal length and x rescales: {}".format(m[6:]))
-        print("The matrix: {}".format(euler_angles_to_rotation_matrix(m)))
-        print()
+            err = err_fun(m[i], x, y[i])
+            print('camera {i} transform: final result has error: {err}')
+
+            np.save(m_file[i], m[i])
+
+            print("Euler angles: {}".format(m[i][:3]))
+            print("Translation: {}".format(m[i][3:6]))
+            print("focal length and x rescales: {}".format(m[i][6:]))
+            print("The matrix: {}".format(euler_angles_to_rotation_matrix(m[i])))
+            print()
 
     #########################################################################
 
@@ -558,42 +579,46 @@ def calibrate():
     #########################################################################
 
 
-    plt.figure()
-    for i in range(y.shape[0]//5):
-        plt.scatter(y[5*i:5*(i+1),0],y[5*i:5*(i+1),1])
-    z= np.zeros(y.shape)
-    for i in range(x.shape[0]):
-        z[i,:]= vicon_to_dv(m, x[i,:])
-    for i in range(z.shape[0]//5):
-        plt.scatter(z[5*i:5*(i+1),0],z[5*i:5*(i+1),1],marker='x')
-    ax= np.array([[[ 0, 0, 0], [1000, 0, 0]],
-         [[ 0, 0, 0], [0, 1000, 0]],
-         [[ 0, 0, 0], [0, 0, 1000]]])
-    ax2= np.empty((3,2,2))
-    for i in range(3):
-        for j in range(2):
-            ax2[i,j,:]= vicon_to_dv(m,ax[i,j,:])
-    for i in range(3):
-        plt.plot(ax2[i,:,0].flatten(),ax2[i,:,1].flatten())
-    plt.xlim([ 0, 346])
-    plt.ylim([ 0, 260])
-    plt.gca().invert_yaxis()
-    plt.show()
+    for i in range(2):
+        plt.figure()
+        for j in range(y[i].shape[0] // 5):
+            plt.scatter(y[i][5*j : 5*(j+1), 0], y[i][5*j : 5*(j+1), 1])
+        z = np.zeros(y[i].shape)
+        for j in range(x.shape[0]):
+            z[j, :] = vicon_to_dv(m[i], x[j, :])
+        for j in range(z.shape[0] // 5):
+            plt.scatter(z[5*j : 5*(j+1), 0], z[5*j : 5*(j+1), 1], marker='x')
+        ax = np.array([[[ 0, 0, 0], [1000, 0, 0]],
+                       [[ 0, 0, 0], [0, 1000, 0]],
+                       [[ 0, 0, 0], [0, 0, 1000]]])
+        ax2 = np.empty((3, 2, 2))
+        for j in range(3):
+            for k in range(2):
+                ax2[j, k, :] = vicon_to_dv(m[i], ax[j, k, :])
+        for j in range(3):
+            plt.plot(ax2[j, :, 0].flatten(), ax2[j, :, 1].flatten())
+        plt.xlim([0, 346])
+        plt.ylim([0, 260])
+        plt.gca().invert_yaxis()
+        plt.show()
+
 
 
     if test:
 
         from vicon_dssdk import ViconDataStream
 
-        image = np.empty(dv_frame_shape, dtype='uint8')
-
         vicon_client = ViconDataStream.Client()
         vicon_client.Connect(f'{vicon_address}:{vicon_port}')
         vicon_client.EnableMarkerData()
 
-        for dv_frame in dv.NetworkFrameInput(address=dv_address, port=dv_frame_port):
-            image[:, :, :] = cv2.undistort(
-                dv_frame.image, dv_camera_matrix, dv_distortion_coefficients, None, dv_camera_matrix)
+        image = [np.empty(dv_frame_shape, dtype='uint8') for i in range(2)]
+        frame_servers = [dv.NetworkFrameInput(address=dv_address, port=dv_frame_port[i]) for i in range(2)]
+
+        for dv_frame in zip(frame_servers):
+            for i in range(2):
+                image[i][:, :, :] = cv2.undistort(
+                    dv_frame[i].image, dv_camera_mtx[i], dv_camera_dist[i], None, dv_camera_mtx[i])
 
             if not vicon_client.GetFrame():
                 continue
@@ -621,18 +646,18 @@ def calibrate():
                         translation = np.array(translation)
 
                         # transform from Vicon space to DV camera space
-                        xy = vicon_to_dv(m, translation)
-                        xy_int = np.rint(xy).astype('int32')
+                        xy = [vicon_to_dv(M, translation) for M in m]
+                        xy_int = [np.rint(XY).astype('int32') for XY in xy]
+                        for i in range(2):
+                            cv2.circle(image[i], (xy_int[i][0], xy_int[i][1]), 3, (0, 255, 0), -1)
 
-                        cv2.circle(image, (xy_int[0], xy_int[1]), 3, (0, 255, 0), -1)
-
-            cv2.imshow('image', image)
-            k = cv2.waitKey(1)
-            if k == 27 or k == ord('q'):
-                exit(0)
+            for i in range(2):
+                cv2.imshow(f'camera {i}', image[i])
+                k = cv2.waitKey(1)
+                if k == 27 or k == ord('q'):
+                    exit(0)
 
         vicon_client.Disconnect()
-
 
     return
 

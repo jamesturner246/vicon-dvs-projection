@@ -12,8 +12,8 @@ import stl
 import cv2
 import dv
 
-from calibrate_projection import vicon_to_dv_2 as vicon_to_dv
-from calibrate_projection import vicon_to_camera_centric_2 as vicon_to_camera_centric
+from calibrate_projection import vicon_to_dv_method_2 as vicon_to_dv
+from calibrate_projection import vicon_to_camera_centric_method_2 as vicon_to_camera_centric
 
 
 def create_event_file(f_name):
@@ -306,10 +306,11 @@ def projection():
 
     prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
 
+    # servers
     vicon_address, vicon_port = '127.0.0.1', 801
     dv_address = '127.0.0.1'
-    event_port = [36000, 36001]
-    frame_port = [36002, 36003]
+    dv_event_port = [36000, 36001]
+    dv_frame_port = [36002, 36003]
 
     props = {}
     mesh = {}
@@ -344,7 +345,7 @@ def projection():
     dv_camera_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
     dv_camera_dist = [np.load(file_name) for file_name in dv_camera_dist_file_name]
 
-    dv_space_transform_file_name = [f'{path_projection}/dv_space_{i}_transform.npy' for i in range(2)]
+    dv_space_transform_file_name = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
     dv_space_transform = [np.load(file_name) for file_name in dv_space_transform_file_name]
 
 
@@ -384,18 +385,13 @@ def projection():
         print('=== begin recording ===')
 
         processes = []
-        processes.append(Process(target=get_events,
-                                 args=(0, record_seconds, dv_address, event_port[0],
-                                       dv_camera_mtx[0], dv_camera_dist[0], raw_event_file_name[0])))
-        processes.append(Process(target=get_events,
-                                 args=(1, record_seconds, dv_address, event_port[1],
-                                       dv_camera_mtx[1], dv_camera_dist[1], raw_event_file_name[1])))
-        processes.append(Process(target=get_frames,
-                                 args=(0, record_seconds, dv_address, frame_port[0],
-                                       dv_camera_mtx[0], dv_camera_dist[0], raw_frame_file_name[0])))
-        processes.append(Process(target=get_frames,
-                                 args=(1, record_seconds, dv_address, frame_port[1],
-                                       dv_camera_mtx[1], dv_camera_dist[1], raw_frame_file_name[1])))
+        for i in range(2):
+            processes.append(Process(target=get_events,
+                                     args=(i, record_seconds, dv_address, dv_event_port[i],
+                                           dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
+            processes.append(Process(target=get_frames,
+                                     args=(i, record_seconds, dv_address, dv_frame_port[i],
+                                           dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
         processes.append(Process(target=get_vicon,
                                  args=(record_seconds, vicon_address, vicon_port,
                                        props, raw_vicon_file_name)))
