@@ -87,10 +87,17 @@ def test():
     mtx_file_name = [f'{path}/camera_{i}_matrix.npy' for i in range(2)]
     dist_file_name = [f'{path}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
 
+    # servers
+    dv_address = '127.0.0.1'
+    dv_frame_port = [36002, 36003]
+
     mtx = [np.load(name) for name in mtx_file_name]
     dist = [np.load(name) for name in dist_file_name]
 
+    # === TEST ===
     for i in range(2):
+        print(f'testing camera {i}')
+
         with dv.NetworkFrameInput(address=dv_address, port=dv_frame_port[i]) as f:
             frame = next(f)
             image_distorted = frame.image.copy()
@@ -122,4 +129,4 @@ def test():
 
 if __name__ == '__main__':
     calibrate()
-    #test()
+    test()
