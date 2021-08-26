@@ -14,14 +14,14 @@
                     for i in {0,1}:
                         f.root.timestamp_<i>: uint64[1]
                         f.root.polarity_<i>: bool[1]
-                        f.root.xy_distorted_<i>: uint16[2]
-                        f.root.xy_undistorted_<i>: uint16[2]
+                        f.root.xy_raw_<i>: uint16[2]
+                        f.root.xy_undistorted_<i>: float64[2]
                         f.root.label_<i>: int8[1]
 
                 frame.h5
                     for i in {0,1}:
                         f.root.timestamp_<i>: uint64[1]
-                        f.root.image_distorted_<i>: uint8[260, 346, 3]
+                        f.root.image_raw_<i>: uint8[260, 346, 3]
                         f.root.image_undistorted_<i>: uint8[260, 346, 3]
                         f.root.label_<i>: uint8[260, 346]
 

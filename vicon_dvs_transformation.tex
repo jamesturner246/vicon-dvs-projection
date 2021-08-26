@@ -13,7 +13,7 @@ Recorded data directories take the form \lstinline|./data/<category>/<sample #>|
 \begin{center}
 	\begin{tabular}{|c|c|}
 		timestamp\_$i$           & frame timestamp (camera $i$) \\
-		image\_distorted\_$i$    & frame before distortion correction (camera $i$) \\
+		image\_raw\_$i$          & frame before distortion correction (camera $i$) \\
 		image\_undistorted\_$i$  & frame after distortion correction (camera $i$) \\
 		label\_$i$               & pixelwise frame label (camera $i$) \\
 	\end{tabular}
@@ -23,7 +23,7 @@ The fields of the visual event file \lstinline|event.h5| are as follows:
 	\begin{tabular}{|c|c|}
 		timestamp\_$i$        & event timestamp (camera $i$) \\
 		polarity\_$i$         & event polarity (camera $i$) \\
-		xy\_distorted\_$i$    & event $x$ and $y$ before distortion correction (camera $i$) \\
+		xy\_raw\_$i$          & event $x$ and $y$ before distortion correction (camera $i$) \\
 		xy\_undistorted\_$i$  & event $x$ and $y$ after distortion correction (camera $i$) \\
 		label\_$i$            & event label (camera $i$) \\
 	\end{tabular}

@@ -1,5 +1,6 @@
 
 import os
+import json
 from collections import deque
 from datetime import datetime
 from multiprocessing import Process
@@ -28,10 +29,10 @@ def create_event_file(f_name):
             f.root, f'timestamp_{i}', tables.atom.UInt64Atom(), (0,))
         data[f'polarity_{i}'] = f.create_earray(
             f.root, f'polarity_{i}', tables.atom.BoolAtom(), (0,))
-        data[f'xy_distorted_{i}'] = f.create_earray(
-            f.root, f'xy_distorted_{i}', tables.atom.UInt16Atom(), (0, 2))
+        data[f'xy_raw_{i}'] = f.create_earray(
+            f.root, f'xy_raw_{i}', tables.atom.UInt16Atom(), (0, 2))
         data[f'xy_undistorted_{i}'] = f.create_earray(
-            f.root, f'xy_undistorted_{i}', tables.atom.UInt16Atom(), (0, 2))
+            f.root, f'xy_undistorted_{i}', tables.atom.Float64Atom(), (0, 2))
         data[f'label_{i}'] = f.create_earray(
             f.root, f'label_{i}', tables.atom.Int8Atom(), (0,))
 
@@ -48,8 +49,8 @@ def create_frame_file(f_name):
     for i in range(2):
         data[f'timestamp_{i}'] = f.create_earray(
             f.root, f'timestamp_{i}', tables.atom.UInt64Atom(), (0,))
-        data[f'image_distorted_{i}'] = f.create_earray(
-            f.root, f'image_distorted_{i}', tables.atom.UInt8Atom(), (0, 260, 346, 3))
+        data[f'image_raw_{i}'] = f.create_earray(
+            f.root, f'image_raw_{i}', tables.atom.UInt8Atom(), (0, 260, 346, 3))
         data[f'image_undistorted_{i}'] = f.create_earray(
             f.root, f'image_undistorted_{i}', tables.atom.UInt8Atom(), (0, 260, 346, 3))
         data[f'label_{i}'] = f.create_earray(
@@ -111,14 +112,14 @@ def get_events(camera, record_seconds, address, port, mtx, dist, f_name):
                 break
 
             # undistort event
-            event_distorted = np.array([event.x, event.y], dtype='float64')
-            event_undistorted = cv2.undistortPoints(
-                event_distorted, mtx, dist, None, mtx)[0, 0]
+            event_xy_raw = np.array([event.x, event.y], dtype='float64')
+            event_xy_undistorted = cv2.undistortPoints(
+                event_xy_raw, mtx, dist, None, mtx)[0, 0]
 
             data[f'timestamp_{camera}'].append([event.timestamp])
             data[f'polarity_{camera}'].append([event.polarity])
-            data[f'xy_distorted_{camera}'].append([event_distorted])
-            data[f'xy_undistorted_{camera}'].append([event_undistorted])
+            data[f'xy_raw_{camera}'].append([event_xy_raw])
+            data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
 
     f.close()
     return
@@ -137,13 +138,13 @@ def get_frames(camera, record_seconds, address, port, mtx, dist, f_name):
                 break
 
             # undistort frame
-            frame_distorted = frame.image[:, :, :]
-            frame_undistorted = cv2.undistort(
-                frame_distorted, mtx, dist, None, mtx)
+            frame_image_raw = frame.image[:, :, :]
+            frame_image_undistorted = cv2.undistort(
+                frame_image_raw, mtx, dist, None, mtx)
 
             data[f'timestamp_{camera}'].append([frame.timestamp])
-            data[f'image_distorted_{camera}'].append([frame_distorted])
-            data[f'image_undistorted_{camera}'].append([frame_undistorted])
+            data[f'image_raw_{camera}'].append([frame_image_raw])
+            data[f'image_undistorted_{camera}'].append([frame_image_undistorted])
 
     f.close()
     return
@@ -247,7 +248,7 @@ def get_next_event(event_iter, camera, usec_offset=0):
     event = {}
     event[f'timestamp_{camera}'] = np.uint64(next(event_iter[f'timestamp_{camera}']) + usec_offset)
     event[f'polarity_{camera}'] = next(event_iter[f'polarity_{camera}'])
-    event[f'xy_distorted_{camera}'] = next(event_iter[f'xy_distorted_{camera}'])
+    event[f'xy_raw_{camera}'] = next(event_iter[f'xy_raw_{camera}'])
     event[f'xy_undistorted_{camera}'] = next(event_iter[f'xy_undistorted_{camera}'])
 
     return event
@@ -256,7 +257,7 @@ def get_next_event(event_iter, camera, usec_offset=0):
 def get_next_frame(frame_iter, camera, usec_offset=0):
     frame = {}
     frame[f'timestamp_{camera}'] = np.uint64(next(frame_iter[f'timestamp_{camera}']) + usec_offset)
-    frame[f'image_distorted_{camera}'] = next(frame_iter[f'image_distorted_{camera}'])
+    frame[f'image_raw_{camera}'] = next(frame_iter[f'image_raw_{camera}'])
     frame[f'image_undistorted_{camera}'] = next(frame_iter[f'image_undistorted_{camera}'])
 
     return frame
@@ -357,6 +358,11 @@ def projection():
     for f in os.listdir(path_data):
         os.remove(path_data + f)
 
+    calibration_paths = {'camera_calibration_path': path_camera,
+                         'projection_calibration_path': path_projection}
+    with open('calibration.json', 'w') as calibration_paths_file:
+        json.dump(calibration_paths, calibration_paths_file)
+
     raw_event_file_name = [f'{path_data}/raw_event_{i}.h5' for i in range(2)]
     raw_frame_file_name = [f'{path_data}/raw_frame_{i}.h5' for i in range(2)]
     raw_vicon_file_name = f'{path_data}/raw_pose.h5'
@@ -367,14 +373,6 @@ def projection():
 
     # event_video_file_name = [f'{path_data}/event_{i}_video.avi' for i in range(2)]
     # frame_video_file_name = [f'{path_data}/frame_{i}_video.avi' for i in range(2)]
-
-
-
-
-    # TODO: JSON FILE AND LINK EXISTING CALIBRATION FILES
-
-
-
 
 
     ##################################################################
@@ -590,7 +588,7 @@ def projection():
         e_iter = {}
         e_iter[f'timestamp_{i}'] = e_file.root.timestamp.iterrows()
         e_iter[f'polarity_{i}'] = e_file.root.polarity.iterrows()
-        e_iter[f'xy_distorted_{i}'] = e_file.root.xy_distorted.iterrows()
+        e_iter[f'xy_raw_{i}'] = e_file.root.xy_raw.iterrows()
         e_iter[f'xy_undistorted_{i}'] = e_file.root.xy_undistorted.iterrows()
         raw_event_file.append(e_file)
         raw_event_iter.append(e_iter)
@@ -602,7 +600,7 @@ def projection():
         f_file = tables.open_file(raw_frame_file_name[i], mode='r')
         f_iter = {}
         f_iter[f'timestamp_{i}'] = f_file.root.timestamp.iterrows()
-        f_iter[f'image_distorted_{i}'] = f_file.root.image_distorted.iterrows()
+        f_iter[f'image_raw_{i}'] = f_file.root.image_raw.iterrows()
         f_iter[f'image_undistorted_{i}'] = f_file.root.image_undistorted.iterrows()
         raw_frame_file.append(f_file)
         raw_frame_iter.append(f_iter)
@@ -730,7 +728,7 @@ def projection():
 
                     # record final frame data
                     final_frame_data[f'timestamp_{i}'].append([frame[i][f'timestamp_{i}']])
-                    final_frame_data[f'image_distorted_{i}'].append([frame[i][f'image_distorted_{i}']])
+                    final_frame_data[f'image_raw_{i}'].append([frame[i][f'image_raw_{i}']])
                     final_frame_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
                     final_frame_data[f'label_{i}'].append([label])
 
@@ -764,23 +762,23 @@ def projection():
                 neg.fill(0)
 
                 while event[i]['timestamp'] < vicon_midway:
-                
-                    # check DV event is in frame
-                    bounded_x = 0 <= event[i][f'xy_undistorted_{i}'][0] < dv_shape[1]
-                    bounded_y = 0 <= event[i][f'xy_undistorted_{i}'][1] < dv_shape[0]
 
-                    if bounded_x and bounded_y:
+                    # check DV event is in frame
+                    xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
+                    xy_bounded = [0 <= xy_int[0] < dv_shape[1], 0 <= xy_int[1] < dv_shape[0]]
+
+                    if all(xy_bounded:
                         if event[i][f'polarity_{i}']:
-                            pos[event[f'xy_undistorted_{i}'][1], event[f'xy_undistorted_{i}'][0]] += 1
+                            pos[xy_int[1], xy_int[0]] += 1
                         else:
-                            neg[event[f'xy_undistorted_{i}'][1], event[f'xy_undistorted_{i}'][0]] += 1
+                            neg[xy_int[1], xy_int[0]] += 1
 
                         # get event label
                         label = 0
                         for j in range(len(props)):
                             prop_name = list(props)[j]
                             mask = prop_masks[prop_name].astype('bool')
-                            if mask[event[i][f'xy_undistorted_{i}'][1], event[i][f'xy_undistorted_{i}'][0]]:
+                            if mask[xy_int[1], xy_int[0]]:
                                 if label != 0:
                                     label = -1 # ambiguous label
                                     break
@@ -789,7 +787,7 @@ def projection():
                         # record final event data
                         final_event_data[f'timestamp_{i}'].append([event[f'timestamp_{i}']])
                         final_event_data[f'polarity_{i}'].append([event[f'polarity_{i}']])
-                        final_event_data[f'xy_distorted_{i}'].append([event[f'xy_distorted_{i}']])
+                        final_event_data[f'xy_raw_{i}'].append([event[f'xy_raw_{i}']])
                         final_event_data[f'xy_undistorted_{i}'].append([event[f'xy_undistorted_{i}']])
                         final_event_data[f'label_{i}'].append([label])
 
