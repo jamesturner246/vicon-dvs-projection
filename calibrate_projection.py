@@ -479,8 +479,8 @@ def calibrate():
 
     i_epoch = 0
     while i_epoch < n_epoch:
+        print(f'calibration epoch {i_epoch}')
         if not reuse:
-            print(f'calibration epoch {i_epoch}')
             input('relocate prop and press enter...')
 
         vicon_wand_coordinates[i_epoch, :, :] = get_vicon_coordinates(
@@ -505,6 +505,8 @@ def calibrate():
                     break
                 elif accept == 'q':
                     exit(0)
+        else:
+            i_epoch += 1
 
 
     #########################################################################
