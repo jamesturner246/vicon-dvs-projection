@@ -3,6 +3,7 @@ import os
 import time
 import cv2
 import dv
+import contextlib
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
@@ -574,10 +575,10 @@ def calibrate():
 
             result = minimize(err_fun, m[i], args=(x, y[i], vicon_to_dv),
                               method=method, options=options)
-            m = result['x']
+            m[i] = result['x']
 
             err = err_fun(m[i], x, y[i], vicon_to_dv)
-            print('camera {i} transform: final result has error: {err}')
+            print(f'camera {i} transform: final result has error: {err}')
 
             np.save(m_file[i], m[i])
 
@@ -628,49 +629,53 @@ def calibrate():
         vicon_client.Connect(f'{vicon_address}:{vicon_port}')
         vicon_client.EnableMarkerData()
 
-        image = [np.empty(dv_frame_shape, dtype='uint8') for i in range(2)]
-        frame_servers = [dv.NetworkFrameInput(address=dv_address, port=dv_frame_port[i]) for i in range(2)]
+        frame_image = [np.empty(dv_frame_shape, dtype='uint8') for i in range(2)]
 
-        for dv_frame in zip(frame_servers):
-            for i in range(2):
-                image[i][:, :, :] = cv2.undistort(
-                    dv_frame[i].image, dv_camera_mtx[i], dv_camera_dist[i], None, dv_camera_mtx[i])
+        with contextlib.ExitStack() as stack:
+            frame_servers = [stack.enter_context(dv.NetworkFrameInput(
+                address=dv_address, port=dv_frame_port[i])) for i in range(2)]
 
-            if not vicon_client.GetFrame():
-                continue
+            while True:
+                dv_frame = [next(frame_servers[i]) for i in range(2)]
 
-            prop_names = vicon_client.GetSubjectNames()
-            prop_count = len(prop_names)
+                for i in range(2):
+                    frame_image[i][:, :, :] = cv2.undistort(
+                        dv_frame[i].image, dv_camera_mtx[i], dv_camera_dist[i], None, dv_camera_mtx[i])
 
-            for i_prop in range(prop_count):
-                prop_name = prop_names[i_prop]
+                if not vicon_client.GetFrame():
+                    continue
 
-                marker_names = vicon_client.GetMarkerNames(prop_name)
+                prop_names = vicon_client.GetSubjectNames()
+                prop_count = len(prop_names)
 
-                try:
-                    prop_quality = vicon_client.GetObjectQuality(prop_name)
-                except ViconDataStream.DataStreamException:
-                    prop_quality = None
+                for i_prop in range(prop_count):
+                    prop_name = prop_names[i_prop]
+                    marker_names = vicon_client.GetMarkerNames(prop_name)
 
-                if prop_quality is not None:
+                    try:
+                        prop_quality = vicon_client.GetObjectQuality(prop_name)
+                    except ViconDataStream.DataStreamException:
+                        prop_quality = None
 
-                    for i_marker in range(len(marker_names)):
-                        marker_name = marker_names[i_marker][0]
+                    if prop_quality is not None:
 
-                        translation = vicon_client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
-                        translation = np.array(translation)
+                        for i_marker in range(len(marker_names)):
+                            marker_name = marker_names[i_marker][0]
 
-                        # transform from Vicon space to DV camera space
-                        xy = [vicon_to_dv(M, translation) for M in m]
-                        xy_int = [np.rint(XY).astype('int32') for XY in xy]
-                        for i in range(2):
-                            cv2.circle(image[i], (xy_int[i][0], xy_int[i][1]), 3, (0, 255, 0), -1)
+                            translation = vicon_client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
+                            translation = np.array(translation)
 
-            for i in range(2):
-                cv2.imshow(f'camera {i}', image[i])
-                k = cv2.waitKey(1)
-                if k == 27 or k == ord('q'):
-                    exit(0)
+                            # transform from Vicon space to DV camera space
+                            xy = [vicon_to_dv(M, translation) for M in m]
+                            xy_int = [np.rint(XY).astype('int32') for XY in xy]
+                            for i in range(2):
+                                cv2.circle(frame_image[i], (xy_int[i][0], xy_int[i][1]), 3, (0, 255, 0), -1)
+
+                for i in range(2):
+                    cv2.imshow(f'camera {i}', frame_image[i])
+                    k = cv2.waitKey(1)
+                    if k == 27 or k == ord('q'):
+                        exit(0)
 
         vicon_client.Disconnect()
 
