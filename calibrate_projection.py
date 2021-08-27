@@ -166,7 +166,7 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
         np.save(coordinates_file, coordinates)
 
     else:
-        marker_translation = collect_vicon_vicon_data(
+        marker_translation = collect_vicon_data(
             address, port, prop_name, marker_names, n_frame, t_frame, debug)
         np.save(marker_translation_file, marker_translation)
 
@@ -181,7 +181,7 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
     return coordinates
 
 
-def collect_dv_data(address, port, n_event, debug):
+def collect_dv_data(address, event_port, n_event, debug):
     event_xy = np.empty((n_event, 2), dtype='int32')
 
     with dv.NetworkEventInput(address=address, port=event_port) as f:
@@ -203,7 +203,7 @@ def collect_dv_data(address, port, n_event, debug):
     return event_xy
 
 
-def process_dv_data(event_xy, frame_shape, camera, mtx, dist, debug):
+def process_dv_data(event_xy, marker_count, frame_shape, camera, mtx, dist, debug):
     erode_dv_kernel = np.ones((3, 3), 'uint8')
     dilate_dv_kernel = np.ones((10, 10), 'uint8')
 
@@ -248,7 +248,7 @@ def process_dv_data(event_xy, frame_shape, camera, mtx, dist, debug):
 
         if all(xy_bounded):
             if event_image_mask[xy_int[1], xy_int[0]] > 0:
-                event_xy_masked[i_event] = xy
+                event_xy_masked[i_event] = xy_undistorted
                 i_event += 1
 
     event_xy_masked.resize((i_event, 2))
@@ -264,7 +264,7 @@ def process_dv_data(event_xy, frame_shape, camera, mtx, dist, debug):
 
     # k-means of masked events
     k_means = KMeans(
-        n_clusters=len(marker_names),
+        n_clusters=marker_count,
         init='k-means++',
         n_init=100,
         max_iter=300,
@@ -304,7 +304,7 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
         event_xy = np.load(event_xy_file)
 
         coordinates = process_dv_data(
-            event_xy, frame_shape, camera, mtx, dist, debug)
+            event_xy, len(marker_names), frame_shape, camera, mtx, dist, debug)
         np.save(coordinates_file, coordinates)
 
     else:
@@ -315,7 +315,7 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
             np.save(event_xy_file, event_xy)
 
             coordinates = process_dv_data(
-                event_xy, frame_shape, camera, mtx, dist, debug)
+                event_xy, len(marker_names), frame_shape, camera, mtx, dist, debug)
             np.save(coordinates_file, coordinates)
 
             # plot coordinates
@@ -341,9 +341,10 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
             plt.show()
 
             while True:
-                accept = input('accept epoch? (y/n/q): ')
+                accept = input('accept coordinates? (y/n/q): ')
                 if accept == 'y':
                     done = True
+                    break
                 elif accept == 'n':
                     break
                 elif accept == 'q':
