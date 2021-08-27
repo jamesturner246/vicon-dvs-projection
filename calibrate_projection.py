@@ -204,7 +204,7 @@ def collect_dv_data(address, event_port, n_event, debug):
 
 
 def process_dv_data(event_xy, marker_count, frame_shape, camera, mtx, dist, debug):
-    erode_dv_kernel = np.ones((3, 3), 'uint8')
+    erode_dv_kernel = np.ones((2, 2), 'uint8')
     dilate_dv_kernel = np.ones((10, 10), 'uint8')
 
     event_image = np.zeros(frame_shape[:2], dtype='int64')
@@ -477,7 +477,8 @@ def calibrate():
     vicon_wand_coordinates = np.empty((n_epoch, n_marker, 3), dtype='float64')
     dv_wand_coordinates = [np.empty((n_epoch, n_marker, 2), dtype='float64') for i in range(2)]
 
-    for i_epoch in range(n_epoch):
+    i_epoch = 0
+    while i_epoch < n_epoch:
         if not reuse:
             print(f'calibration epoch {i_epoch}')
             input('relocate prop and press enter...')
@@ -494,6 +495,16 @@ def calibrate():
                 n_event=dv_n_event, frame_shape=dv_frame_shape,
                 reuse=reuse, debug=debug, path=path)
 
+        if not reuse:
+            while True:
+                accept = input('accept epoch? (y/n/q): ')
+                if accept == 'y':
+                    i_epoch += 1
+                    break
+                elif accept == 'n':
+                    break
+                elif accept == 'q':
+                    exit(0)
 
 
     #########################################################################
