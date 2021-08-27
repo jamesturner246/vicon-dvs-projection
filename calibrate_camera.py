@@ -113,7 +113,7 @@ def test():
         image_undistorted = cv2.undistort(image_distorted, mtx[i], dist[i], None, mtx[i])
 
         point_undistorted = []
-        for x in point_distorted: 
+        for x in point_distorted:
             y = cv2.undistortPoints(x, mtx[i], dist[i], None, mtx[i])[0]
             point_undistorted.append(y)
         point_undistorted = np.vstack(point_undistorted)

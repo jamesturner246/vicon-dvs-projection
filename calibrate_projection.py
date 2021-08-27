@@ -97,150 +97,128 @@ def identify_wand_markers(dv):
     return dv
 
 
+def collect_vicon_data(address, port, prop_name, marker_names, n_frame, t_frame, debug):
+
+    from vicon_dssdk import ViconDataStream
+
+    marker_translation = np.empty((n_frame, len(marker_names), 3), dtype='float64')
+
+    client = ViconDataStream.Client()
+    client.Connect(f'{address}:{port}')
+    client.EnableMarkerData()
+
+    progress = tqdm(total=n_frame, leave=False)
+    i_frame = 0
+
+    while i_frame < n_frame:
+        if not client.GetFrame():
+            continue
+
+        try:
+            prop_quality = client.GetObjectQuality(prop_name)
+        except ViconDataStream.DataStreamException:
+            prop_quality = None
+
+        if prop_quality is not None:
+            actual_marker_names = client.GetMarkerNames(prop_name)
+            assert(len(marker_names) == len(actual_marker_names))
+
+            for i_marker in range(len(actual_marker_names)):
+                marker_name = marker_names[i_marker]
+                actual_marker_name = actual_marker_names[i_marker][0]
+                assert(marker_name == actual_marker_name)
+
+                translation = client.GetMarkerGlobalTranslation(prop_name, actual_marker_name)[0]
+                marker_translation[i_frame, i_marker, :] = translation
+
+            i_frame += 1
+            progress.update(1)
+
+        time.sleep(t_frame)
+
+    progress.close()        
+    client.Disconnect()
+
+    return marker_translation
+
+
+def process_vicon_data(marker_translation, debug):
+    coordinates = np.median(marker_translation, 0)
+
+    return coordinates
+
+
 def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
                           n_frame=100, t_frame=0.001,
                           reuse=False, debug=False,
                           path='./calibration'):
 
-    print('Vicon coordinates')
+    print('get Vicon coordinates')
 
     marker_translation_file = f'{path}/vicon_marker_translation_{i_epoch}.npy'
     coordinates_file = f'{path}/vicon_coordinates_{i_epoch}.npy'
 
-    marker_count = len(marker_names)
-
-
-    # === COLLECT RAW DATA ===
     if reuse:
         marker_translation = np.load(marker_translation_file)
 
+        coordinates = process_vicon_data(
+            marker_translation, debug)
+        np.save(coordinates_file, coordinates)
+
     else:
-        from vicon_dssdk import ViconDataStream
-
-        marker_translation = np.empty((n_frame, marker_count, 3), dtype='float64')
-
-        client = ViconDataStream.Client()
-        client.Connect(f'{address}:{port}')
-        client.EnableMarkerData()
-
-        progress = tqdm(total=n_frame, leave=False)
-        i_frame = 0
-
-        while i_frame < n_frame:
-            if not client.GetFrame():
-                continue
-
-            try:
-                prop_quality = client.GetObjectQuality(prop_name)
-            except ViconDataStream.DataStreamException:
-                prop_quality = None
-
-            if prop_quality is not None:
-                actual_marker_names = client.GetMarkerNames(prop_name)
-                actual_marker_count = len(actual_marker_names)
-                assert(marker_count == actual_marker_count)
-
-                for i_marker in range(actual_marker_count):
-                    marker_name = marker_names[i_marker]
-                    actual_marker_name = actual_marker_names[i_marker][0]
-                    assert(marker_name == actual_marker_name)
-
-                    translation = client.GetMarkerGlobalTranslation(prop_name, actual_marker_name)[0]
-                    marker_translation[i_frame, i_marker, :] = translation
-
-                i_frame += 1
-                progress.update(1)
-
-            time.sleep(t_frame)
-
-        progress.close()        
-        client.Disconnect()
-
-        # save raw data
+        marker_translation = collect_vicon_vicon_data(
+            address, port, prop_name, marker_names, n_frame, t_frame, debug)
         np.save(marker_translation_file, marker_translation)
 
-
-    # == PROCESS RAW DATA ===
-    coordinates = np.median(marker_translation, 0)
-
-    # save processed data
-    np.save(coordinates_file, coordinates)
+        coordinates = process_vicon_data(
+            marker_translation, debug)
+        np.save(coordinates_file, coordinates)
 
     # print Vicon coordinates
-    for i in range(marker_count):
+    for i in range(len(marker_names)):
         print(f'name: {marker_names[i]:<15s} coordinates: {coordinates[i]}')
 
     return coordinates
 
 
-def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name, marker_names,
-                            camera, mtx, dist,
-                            n_event=10000, frame_shape=(260, 346, 3),
-                            reuse=False, debug=False,
-                            path='./calibration'):
+def collect_dv_data(address, port, n_event, debug):
+    event_xy = np.empty((n_event, 2), dtype='int32')
 
-    print('DV coordinates')
+    with dv.NetworkEventInput(address=address, port=event_port) as f:
+        progress = tqdm(total=n_event, leave=False)
+        i_event = 0
 
-    event_timestamp_file = f'{path}/dv_{camera}_event_timestamp_{i_epoch}.npy'
-    event_polarity_file = f'{path}/dv_{camera}_event_polarity_{i_epoch}.npy'
-    event_xy_distorted_file = f'{path}/dv_{camera}_event_xy_distorted_{i_epoch}.npy'
-    event_xy_undistorted_file = f'{path}/dv_{camera}_event_xy_undistorted_{i_epoch}.npy'
-    coordinates_file = f'{path}/dv_{camera}_coordinates_{i_epoch}.npy'
+        for event in f:
+            if i_event == n_event:
+                break
 
-    marker_count = len(marker_names)
+            # record and undistort event
+            event_xy[i_event] = [event.x, event.y]
+
+            i_event += 1
+            progress.update(1)
+
+        progress.close()
+
+    return event_xy
+
+
+def process_dv_data(event_xy, frame_shape, camera, mtx, dist, debug):
     erode_dv_kernel = np.ones((3, 3), 'uint8')
     dilate_dv_kernel = np.ones((10, 10), 'uint8')
 
-
-    # === COLLECT RAW DATA ===
-    if reuse:
-        event_timestamp = np.load(event_timestamp_file)
-        event_polarity = np.load(event_polarity_file)
-        event_xy_distorted = np.load(event_xy_distorted_file)
-
-    else:
-        event_timestamp = np.empty((n_event), dtype='uint64')
-        event_polarity = np.empty((n_event), dtype='bool')
-        event_xy_distorted = np.empty((n_event, 2), dtype='int32')
-
-        with dv.NetworkEventInput(address=address, port=event_port) as f:
-            progress = tqdm(total=n_event, leave=False)
-            i_event = 0
-
-            for event in f:
-                if i_event == n_event:
-                    break
-
-                # record and undistort event
-                event_timestamp[i_event] = event.timestamp
-                event_polarity[i_event] = event.polarity
-                event_xy_distorted[i_event] = [event.x, event.y]
-
-                i_event += 1
-                progress.update(1)
-
-            progress.close()
-
-        # save raw data
-        np.save(event_timestamp_file, event_timestamp)
-        np.save(event_polarity_file, event_polarity)
-        np.save(event_xy_distorted_file, event_xy_distorted)
-
-
-    # == PROCESS RAW DATA ===
-    event_xy_undistorted = np.empty((n_event, 2), dtype='int32')
     event_image = np.zeros(frame_shape[:2], dtype='int64')
+    event_xy_masked = np.empty(event_xy.shape, dtype='int32')
 
-    for i_event in range(n_event):
-        event_xy_undistorted[i_event] = np.rint(cv2.undistortPoints(
-            event_xy_distorted.astype('float64')[i_event],
-            mtx, dist, None, mtx)[0, 0])
+    # accumulate events
+    for xy in event_xy:
+        xy_undistorted = cv2.undistortPoints(
+            xy.astype('float64'), mtx, dist, None, mtx)[0, 0]
+        xy_int = np.rint(xy_undistorted).astype('int32')
+        xy_bounded = [0 <= xy_int[0] < frame_shape[1], 0 <= xy_int[1] < frame_shape[0]]
 
-        x = event_xy_undistorted[i_event, 0]
-        y = event_xy_undistorted[i_event, 1]
-        if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
-            event_image[y, x] += 1.0
-
+        if all(xy_bounded):
+            event_image[xy_int[1], xy_int[0]] += 1.0
 
     if debug:
         # plot unmasked event image
@@ -261,16 +239,16 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
     event_image[~(event_image_mask.astype('bool'))] = 0
 
     # mask events
-    event_xy_masked = np.empty((n_event, 2), dtype='int32')
     i_event = 0
+    for xy in event_xy:
+        xy_undistorted = cv2.undistortPoints(
+            xy.astype('float64'), mtx, dist, None, mtx)[0, 0]
+        xy_int = np.rint(xy_undistorted).astype('int32')
+        xy_bounded = [0 <= xy_int[0] < frame_shape[1], 0 <= xy_int[1] < frame_shape[0]]
 
-    for event_xy in event_xy_undistorted:
-        x = event_xy[0]
-        y = event_xy[1]
-
-        if 0 <= x < frame_shape[1] and 0 <= y < frame_shape[0]:
-            if event_image_mask[y, x] > 0:
-                event_xy_masked[i_event] = event_xy
+        if all(xy_bounded):
+            if event_image_mask[xy_int[1], xy_int[0]] > 0:
+                event_xy_masked[i_event] = xy
                 i_event += 1
 
     event_xy_masked.resize((i_event, 2))
@@ -286,14 +264,15 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
 
     # k-means of masked events
     k_means = KMeans(
-        n_clusters=marker_count,
+        n_clusters=len(marker_names),
         init='k-means++',
         n_init=100,
         max_iter=300,
         #tol=1e-4,
         #random_state=0,
-    ).fit(event_xy_masked)
-    coordinates = k_means.cluster_centers_
+    )
+    result = k_means.fit(event_xy_masked)
+    coordinates = result.cluster_centers_
     coordinates = identify_wand_markers(coordinates)
 
     if debug:
@@ -308,36 +287,70 @@ def get_dv_wand_coordinates(i_epoch, address, event_port, frame_port, prop_name,
         # close debug plots
         cv2.destroyAllWindows()
 
-    # plot coordinates
-    if not reuse:
+    return coordinates
 
-        with dv.NetworkFrameInput(address=address, port=frame_port) as f:
-            frame = next(f)
 
-        frame_image = cv2.undistort(
-            frame.image, mtx, dist, None, mtx)
+def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, marker_names,
+                       camera, mtx, dist, n_event=10000, frame_shape=(260, 346, 3),
+                       reuse=False, debug=False,
+                       path='./calibration'):
 
-        # plot markers
-        fig, ax = plt.subplots()
-        ax.imshow(frame_image[:, :, (2, 1, 0)])
-        ax.plot(coordinates[:, 0], coordinates[:, 1], '*b')
-        ax.text(coordinates[0, 0], coordinates[0, 1], 'top_left', color='blue')
-        ax.text(coordinates[1, 0], coordinates[1, 1], 'top_centre', color='blue')
-        ax.text(coordinates[2, 0], coordinates[2, 1], 'top_right', color='blue')
-        ax.text(coordinates[3, 0], coordinates[3, 1], 'middle', color='blue')
-        ax.text(coordinates[4, 0], coordinates[4, 1], 'bottom', color='blue')
-        ax.set_title(f'camera {camera}')
-        ax.set_ylim([0, frame_shape[0]])
-        ax.set_xlim([0, frame_shape[1]])
-        ax.invert_yaxis()
-        plt.show()
+    print(f'get DV {camera} coordinates')
 
-    # save processed data
-    np.save(event_xy_undistorted_file, event_xy_undistorted)
-    np.save(coordinates_file, coordinates)
+    event_xy_file = f'{path}/dv_{camera}_event_xy_{i_epoch}.npy'
+    coordinates_file = f'{path}/dv_{camera}_coordinates_{i_epoch}.npy'
+
+    if reuse:
+        event_xy = np.load(event_xy_file)
+
+        coordinates = process_dv_data(
+            event_xy, frame_shape, camera, mtx, dist, debug)
+        np.save(coordinates_file, coordinates)
+
+    else:
+        done = False
+        while not done:
+            event_xy = collect_dv_data(
+                address, event_port, n_event, debug)
+            np.save(event_xy_file, event_xy)
+
+            coordinates = process_dv_data(
+                event_xy, frame_shape, camera, mtx, dist, debug)
+            np.save(coordinates_file, coordinates)
+
+            # plot coordinates
+            with dv.NetworkFrameInput(address=address, port=frame_port) as f:
+                frame = next(f)
+
+            frame_image = cv2.undistort(
+                frame.image, mtx, dist, None, mtx)
+
+            # plot markers
+            fig, ax = plt.subplots()
+            ax.imshow(frame_image[:, :, (2, 1, 0)])
+            ax.plot(coordinates[:, 0], coordinates[:, 1], '*b')
+            ax.text(coordinates[0, 0], coordinates[0, 1], 'top_left', color='blue')
+            ax.text(coordinates[1, 0], coordinates[1, 1], 'top_centre', color='blue')
+            ax.text(coordinates[2, 0], coordinates[2, 1], 'top_right', color='blue')
+            ax.text(coordinates[3, 0], coordinates[3, 1], 'middle', color='blue')
+            ax.text(coordinates[4, 0], coordinates[4, 1], 'bottom', color='blue')
+            ax.set_title(f'camera {camera}')
+            ax.set_ylim([0, frame_shape[0]])
+            ax.set_xlim([0, frame_shape[1]])
+            ax.invert_yaxis()
+            plt.show()
+
+            while True:
+                accept = input('accept epoch? (y/n/q): ')
+                if accept == 'y':
+                    done = True
+                elif accept == 'n':
+                    break
+                elif accept == 'q':
+                    exit(0)
 
     # print DV coordinates
-    for i in range(marker_count):
+    for i in range(len(marker_names)):
         print(f'camera: {camera} name: {marker_names[i]:<15s} coordinates: {coordinates[i]}')
 
     return coordinates
@@ -463,8 +476,7 @@ def calibrate():
     vicon_wand_coordinates = np.empty((n_epoch, n_marker, 3), dtype='float64')
     dv_wand_coordinates = [np.empty((n_epoch, n_marker, 2), dtype='float64') for i in range(2)]
 
-    i_epoch = 0
-    while i_epoch < n_epoch:
+    for i_epoch in range(n_epoch):
         if not reuse:
             print(f'calibration epoch {i_epoch}')
             input('relocate prop and press enter...')
@@ -475,20 +487,11 @@ def calibrate():
             reuse=reuse, debug=debug, path=path)
 
         for i in range(2):
-            dv_wand_coordinates[i][i_epoch, :, :] = get_dv_wand_coordinates(
+            dv_wand_coordinates[i][i_epoch, :, :] = get_dv_coordinates(
                 i_epoch, dv_address, dv_event_port[i], dv_frame_port[i], prop_name, marker_names,
                 i, dv_camera_mtx[i], dv_camera_dist[i],
                 n_event=dv_n_event, frame_shape=dv_frame_shape,
                 reuse=reuse, debug=debug, path=path)
-
-        if not reuse:
-            accept = ''
-            while accept != 'y' and accept != 'n':
-                accept = input('accept epoch? (y/n): ')
-                if accept == 'y':
-                    i_epoch += 1
-        else:
-            i_epoch += 1
 
 
 
@@ -630,7 +633,6 @@ def calibrate():
                 prop_name = prop_names[i_prop]
 
                 marker_names = vicon_client.GetMarkerNames(prop_name)
-                marker_count = len(marker_names)
 
                 try:
                     prop_quality = vicon_client.GetObjectQuality(prop_name)
@@ -639,7 +641,7 @@ def calibrate():
 
                 if prop_quality is not None:
 
-                    for i_marker in range(marker_count):
+                    for i_marker in range(len(marker_names)):
                         marker_name = marker_names[i_marker][0]
 
                         translation = vicon_client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]

@@ -767,7 +767,7 @@ def projection():
                     xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
                     xy_bounded = [0 <= xy_int[0] < dv_shape[1], 0 <= xy_int[1] < dv_shape[0]]
 
-                    if all(xy_bounded:
+                    if all(xy_bounded):
                         if event[i][f'polarity_{i}']:
                             pos[xy_int[1], xy_int[0]] += 1
                         else:
