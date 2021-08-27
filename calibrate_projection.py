@@ -413,7 +413,7 @@ def euler_angles_to_rotation_matrix(m):
     return M
 
 
-def err_fun(m, vicon_p, dv_p):
+def err_fun(m, vicon_p, dv_p, vicon_to_dv):
     assert dv_p.shape[0] == vicon_p.shape[0]
 
     error = 0.0
@@ -513,7 +513,6 @@ def calibrate():
 
     if calibrate_projection_method == 1:
         vicon_to_dv = vicon_to_dv_method_1
-        vicon_to_camera_centric = vicon_to_camera_centric_method_1
 
         # Vicon to DV transformation
         m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
@@ -525,13 +524,14 @@ def calibrate():
         options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
         for i in range(2):
-            err = err_fun(m[i], x, y[i])
+            err = err_fun(m[i], x, y[i], vicon_to_dv)
             print(f'camera {i} transform: original guess has error: {err}')
 
-            result = minimize(err_fun, m[i], args=(x, y[i]), method=method, options=options)
+            result = minimize(err_fun, m[i], args=(x, y[i], vicon_to_dv),
+                              method=method, options=options)
             m[i] = result['x']
 
-            err = err_fun(m[i], x, y[i])
+            err = err_fun(m[i], x, y[i], vicon_to_dv)
             print(f'camera {i} transform: final result has error: {err}')
 
             np.save(m_file[i], m[i])
@@ -546,7 +546,6 @@ def calibrate():
 
     elif calibrate_projection_method == 2:
         vicon_to_dv = vicon_to_dv_method_2
-        vicon_to_camera_centric = vicon_to_camera_centric_method_2
 
         # the meaning of m is as follows:
         # 0-2 Euler angles of transform into camera oriented space
@@ -555,8 +554,7 @@ def calibrate():
 
         # Vicon to DV transformation
         m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
-        m = np.empty(8)
-
+        m = [np.empty(8) for i in range(2)]
         for i in range(2):
             # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
             m[i][:3] = [3.14, 1.6, 0.0]
@@ -571,13 +569,14 @@ def calibrate():
         options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
         for i in range(2):
-            err = err_fun(m[i], x, y[i])
+            err = err_fun(m[i], x, y[i], vicon_to_dv)
             print(f'camera {i} transform: original guess has error: {err}')
 
-            result = minimize(err_fun, m[i], args=(x, y[i]), method=method, options=options)
+            result = minimize(err_fun, m[i], args=(x, y[i], vicon_to_dv),
+                              method=method, options=options)
             m = result['x']
 
-            err = err_fun(m[i], x, y[i])
+            err = err_fun(m[i], x, y[i], vicon_to_dv)
             print('camera {i} transform: final result has error: {err}')
 
             np.save(m_file[i], m[i])
