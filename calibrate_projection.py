@@ -360,34 +360,34 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
 
 def vicon_to_dv_method_1(v, m):
     z = vicon_to_camera_centric_method_1(v, m)
-    z[:, :2] *= (1 / z[:, 2]) * 4  # focal length 4 mm
-    z = z[:, :2]
-    z /= 1.8e-2                    # 18 micrometer/pixel = 1.8e-2 mm/pixel
-    z += [173, 130]                # add the origin offset from image centre to top left corner explicitly
+    z[:2] *= (1 / z[2]) * 4  # focal length 4 mm
+    z = z[:2]
+    z /= 1.8e-2              # 18 micrometer/pixel = 1.8e-2 mm/pixel
+    z += [173, 130]          # add the origin offset from image centre to top left corner explicitly
     return z
 
 
 def vicon_to_camera_centric_method_1(v, m):
     M = np.reshape(m[:9], (3, 3))
-    z = np.dot(v, M)               # apply the rotation to get into the camera orientation frame
-    z += m[9:12] * 10              # add the translation (using cm for a better scale of fitting)
+    z = np.dot(v, M)         # apply the rotation to get into the camera orientation frame
+    z += m[9:12] * 10        # add the translation (using cm for a better scale of fitting)
     return z
 
 
 def vicon_to_dv_method_2(v, m):
     z = vicon_to_camera_centric_method_2(v, m)
-    z[:, :2] *= (1 / z[:, 2]) * 4 * m[6]  # focal length 4 mm
-    z = z[:, :2]
-    z /= 1.8e-2                           # 18 micrometer/pixel = 1.8e-2 mm/pixel
-    z[:, 0] *= m[7]                       # allow for some rescaling of x due to the camera undistortion method
-    z += [173, 130]                       # add the origin offset from image centre to top left corner explicitly
+    z[:2] *= (1 / z[2]) * 4 * m[6]  # focal length 4 mm
+    z = z[:2]
+    z /= 1.8e-2                     # 18 micrometer/pixel = 1.8e-2 mm/pixel
+    z[0] *= m[7]                    # allow for some rescaling of x due to the camera undistortion method
+    z += [173, 130]                 # add the origin offset from image centre to top left corner explicitly
     return z
 
 
 def vicon_to_camera_centric_method_2(v, m):
     M = euler_angles_to_rotation_matrix(m)
-    z = np.dot(v, M)                      # apply the rotation to get into the camera orientation frame
-    z += m[3:6] * 10                      # add the translation (using cm for a better scale of fitting)
+    z = np.dot(v, M)                # apply the rotation to get into the camera orientation frame
+    z += m[3:6] * 10                # add the translation (using cm for a better scale of fitting)
     return z
 
 
