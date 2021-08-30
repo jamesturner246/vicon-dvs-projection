@@ -474,7 +474,7 @@ def projection():
                 translation = vicon['translation'][prop_name][marker_name]
                 final_vicon_data['translation'][prop_name][marker_name].append([translation])
                 for i in range(2):
-                    cam_translation = vicon_to_camera_centric(dv_space_transform[i], translation)
+                    cam_translation = vicon_to_camera_centric(translation, dv_space_transform[i])
                     final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name].append([cam_translation])
 
             # check current Vicon frame
@@ -515,7 +515,7 @@ def projection():
                         translation = f(vicon['timestamp'])
                         final_vicon_data['translation'][prop_name][marker_name][-1] = translation
                         for i in range(2):
-                            cam_translation = vicon_to_camera_centric(dv_space_transform[i], translation)
+                            cam_translation = vicon_to_camera_centric(translation, dv_space_transform[i])
                             final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name][-1] = cam_translation
 
                 else: # bad frame timeout
@@ -694,7 +694,7 @@ def projection():
             # transform STL mesh space to Vicon space, then
             # transform from Vicon space to DV camera space
             vicon_space_p = np.matmul(mesh[prop_name].vectors, vicon_space_coefficients) + vicon_space_constants
-            dv_space_p = [vicon_to_dv(dv_space_transform[i], vicon_space_p.T) for i in range(2)]
+            dv_space_p = [vicon_to_dv(vicon_space_p, dv_space_transform[i]) for i in range(2)]
             dv_space_p_int = [np.rint(p).astype('int32') for p in dv_space_p]
 
             # compute prop mask

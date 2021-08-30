@@ -358,59 +358,52 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
     return coordinates
 
 
-def vicon_to_dv_method_1(m, v):
-    if v.ndim == 1:
-        v = v[np.newaxis].T
-
-    z = vicon_to_camera_centric_method_1(m, v)
-    z[:2] *= (1.0 / z[2]) * 4      # focal length 4 mm
-    z = z[:2]
+def vicon_to_dv_method_1(v, m):
+    z = vicon_to_camera_centric_method_1(v, m)
+    z[:, :2] *= (1 / z[:, 2]) * 4  # focal length 4 mm
+    z = z[:, :2]
     z /= 1.8e-2                    # 18 micrometer/pixel = 1.8e-2 mm/pixel
-    z += [[173], [130]]            # add the origin offset from image centre to top left corner explicitly
-
+    z += [173, 130]                # add the origin offset from image centre to top left corner explicitly
     return z
 
 
-def vicon_to_camera_centric_method_1(m, v):
+def vicon_to_camera_centric_method_1(v, m):
     M = np.reshape(m[:9], (3, 3))
-    z = np.dot(M, v)               # apply the rotation to get into the camera orientation frame
-    z += m[9:12, np.newaxis] * 10  # add the translation (using cm for a better scale of fitting)
+    z = np.dot(v, M)               # apply the rotation to get into the camera orientation frame
+    z += m[9:12] * 10              # add the translation (using cm for a better scale of fitting)
     return z
 
 
-def vicon_to_dv_method_2(m, v):
-    if v.ndim == 1:
-        v = v[np.newaxis].T
-
-    z = vicon_to_camera_centric_method_2(m, v)
-    z[:2] *= (1.0 / z[2]) * 4 * m[6]  # focal length 4 mm
-    z = z[:2]
-    z /= 1.8e-2                       # 18 micrometer/pixel = 1.8e-2 mm/pixel
-    z[0] *= m[7]                      # allow for some rescaling of x due to the camera undistortion method
-    z += [[173], [130]]               # add the origin offset from image centre to top left corner explicitly
+def vicon_to_dv_method_2(v, m):
+    z = vicon_to_camera_centric_method_2(v, m)
+    z[:, :2] *= (1 / z[:, 2]) * 4 * m[6]  # focal length 4 mm
+    z = z[:, :2]
+    z /= 1.8e-2                           # 18 micrometer/pixel = 1.8e-2 mm/pixel
+    z[:, 0] *= m[7]                       # allow for some rescaling of x due to the camera undistortion method
+    z += [173, 130]                       # add the origin offset from image centre to top left corner explicitly
     return z
 
 
-def vicon_to_camera_centric_method_2(m, v):
+def vicon_to_camera_centric_method_2(v, m):
     M = euler_angles_to_rotation_matrix(m)
-    z = np.dot(M, v)                  # apply the rotation to get into the camera orientation frame
-    z += m[3:6, np.newaxis] * 10      # add the translation (using cm for a better scale of fitting)
+    z = np.dot(v, M)                      # apply the rotation to get into the camera orientation frame
+    z += m[3:6] * 10                      # add the translation (using cm for a better scale of fitting)
     return z
 
 
 def euler_angles_to_rotation_matrix(m):
     M = np.array([
-        [np.cos(m[0]), -np.sin(m[0]), 0],
-        [np.sin(m[0]), np.cos(m[0]), 0],
-        [0, 0, 1]])
-    M = np.dot(np.array([
-        [1, 0, 0],
-        [0, np.cos(m[1]), -np.sin(m[1])],
-        [0, np.sin(m[1]), np.cos(m[1])]]), M)
-    M = np.dot(np.array([
-        [np.cos(m[2]), -np.sin(m[2]), 0],
-        [np.sin(m[2]), np.cos(m[2]), 0],
-        [0, 0, 1]]), M)
+        [ np.cos(m[0]), np.sin(m[0]), 0],
+        [-np.sin(m[0]), np.cos(m[0]), 0],
+        [ 0,            0,            1]])
+    M = np.dot(M, np.array([
+        [1,  0,            0],
+        [0,  np.cos(m[1]), np.sin(m[1])],
+        [0, -np.sin(m[1]), np.cos(m[1])]]))
+    M = np.dot(M, np.array([
+        [ np.cos(m[2]), np.sin(m[2]), 0],
+        [-np.sin(m[2]), np.cos(m[2]), 0],
+        [ 0,            0,            1]]))
     return M
 
 
@@ -419,7 +412,7 @@ def err_fun(m, vicon_p, dv_p, vicon_to_dv):
 
     error = 0.0
     for v, d in zip(vicon_p, dv_p):
-        output = vicon_to_dv(m, v)
+        output = vicon_to_dv(v, m)
         difference = output - d
         error += np.dot(difference, difference)
 
@@ -517,7 +510,7 @@ def calibrate():
 
         # Vicon to DV transformation
         m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
-        m = [np.load('./calibration/bootstrap_dv_space_transform.npy') for i in range(2)]
+        m = [np.load('./bootstrap_calibration/bootstrap_dv_space_transform.npy') for i in range(2)]
         x = np.vstack(vicon_wand_coordinates)
         y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
 
@@ -540,7 +533,7 @@ def calibrate():
             print('DV space coefficients')
             print(np.reshape(m[i][:9], (3, 3)))
             print('DV space constants')
-            print(m[i][9:])
+            print(m[i][9:12])
             print()
 
     #########################################################################
@@ -602,7 +595,7 @@ def calibrate():
             plt.scatter(y[i][5*j : 5*(j+1), 0], y[i][5*j : 5*(j+1), 1])
         z = np.zeros(y[i].shape)
         for j in range(x.shape[0]):
-            z[j, :] = vicon_to_dv(m[i], x[j, :])
+            z[j, :] = vicon_to_dv(x[j, :], m[i])
         for j in range(z.shape[0] // 5):
             plt.scatter(z[5*j : 5*(j+1), 0], z[5*j : 5*(j+1), 1], marker='x')
         ax = np.array([[[ 0, 0, 0], [1000, 0, 0]],
@@ -611,7 +604,7 @@ def calibrate():
         ax2 = np.empty((3, 2, 2))
         for j in range(3):
             for k in range(2):
-                ax2[j, k, :] = vicon_to_dv(m[i], ax[j, k, :])
+                ax2[j, k, :] = vicon_to_dv(ax[j, k, :], m[i])
         for j in range(3):
             plt.plot(ax2[j, :, 0].flatten(), ax2[j, :, 1].flatten())
         plt.xlim([0, 346])
@@ -666,7 +659,7 @@ def calibrate():
                             translation = np.array(translation)
 
                             # transform from Vicon space to DV camera space
-                            xy = [vicon_to_dv(M, translation) for M in m]
+                            xy = [vicon_to_dv(translation, M) for M in m]
                             xy_int = [np.rint(XY).astype('int32') for XY in xy]
                             for i in range(2):
                                 cv2.circle(frame_image[i], (xy_int[i][0], xy_int[i][1]), 3, (0, 255, 0), -1)
