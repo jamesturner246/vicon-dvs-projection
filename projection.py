@@ -3,6 +3,7 @@ import os
 import json
 from collections import deque
 from datetime import datetime
+import pause
 from multiprocessing import Process
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import LinearRegression
@@ -96,16 +97,14 @@ def create_vicon_file(f_name, props):
     return f, data
 
 
-def get_events(camera, record_seconds, address, port, mtx, dist, f_name):
+def get_events(camera, start_time, end_time, address, port, mtx, dist, f_name):
     f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
-        event = next(event_f)
-        record_time = record_seconds * 1000000
-        stop_time = event.timestamp + record_time
+        pause.until(start_time)
 
         for event in event_f:
-            if event.timestamp >= stop_time:
+            if time.time() >= stop_time
                 break
 
             # undistort event
@@ -122,16 +121,14 @@ def get_events(camera, record_seconds, address, port, mtx, dist, f_name):
     return
 
 
-def get_frames(camera, record_seconds, address, port, mtx, dist, f_name):
+def get_frames(camera, start_time, end_time, address, port, mtx, dist, f_name):
     f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
-        frame = next(frame_f)
-        record_time = record_seconds * 1000000
-        stop_time = frame.timestamp_end_of_frame + record_time
+        pause.until(start_time)
 
         for frame in frame_f:
-            if frame.timestamp_end_of_frame >= stop_time:
+            if time.time() >= stop_time
                 break
 
             # undistort frame
@@ -147,7 +144,7 @@ def get_frames(camera, record_seconds, address, port, mtx, dist, f_name):
     return
 
 
-def get_vicon(record_seconds, address, port, props, f_name):
+def get_vicon(start_time, end_time, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
@@ -158,12 +155,10 @@ def get_vicon(record_seconds, address, port, props, f_name):
     client.EnableMarkerData()
     client.EnableSegmentData()
 
-    # begin frame collection
-    timestamp = int(datetime.now().timestamp() * 1000000)
-    record_time = record_seconds * 1000000
-    stop_time = timestamp + record_time
+    pause.until(start_time)
 
-    while timestamp < stop_time:
+    # begin frame collection
+    while time.time() < stop_time:
         if not client.GetFrame():
             continue
 
@@ -373,16 +368,19 @@ def projection():
         for f in os.listdir(path_data):
             os.remove(f'{path_data}/{f}')
 
+        start_time = time.time() + 5
+        end_time = start_time + record_seconds
+
         processes = []
         for i in range(2):
             processes.append(Process(target=get_events,
-                                     args=(i, record_seconds, dv_address, dv_event_port[i],
+                                     args=(i, start_time, end_time, dv_address, dv_event_port[i],
                                            dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
             processes.append(Process(target=get_frames,
-                                     args=(i, record_seconds, dv_address, dv_frame_port[i],
+                                     args=(i, start_time, end_time, dv_address, dv_frame_port[i],
                                            dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
         processes.append(Process(target=get_vicon,
-                                 args=(record_seconds, vicon_address, vicon_port,
+                                 args=(start_time, end_time, vicon_address, vicon_port,
                                        props, raw_vicon_file_name)))
 
         for p in processes:
@@ -675,7 +673,7 @@ def projection():
         print('Vicon frame timestamp: ', vicon['timestamp'])
 
         for prop_name in props.keys():
-            print(f'extrapolated {prop_name}:', next(final_vicon_iter['extrapolated'][prop_name]))
+            #print(f'extrapolated {prop_name}:', next(final_vicon_iter['extrapolated'][prop_name]))
 
             # get mesh and Vicon marker translations for this prop
             x = np.array(list(props[prop_name].values()))
