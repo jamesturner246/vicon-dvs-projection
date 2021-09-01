@@ -13,9 +13,6 @@ import stl
 import cv2
 import dv
 
-from calibrate_projection import vicon_to_dv_method_2 as vicon_to_dv
-from calibrate_projection import vicon_to_camera_centric_method_2 as vicon_to_camera_centric
-
 
 def create_event_file(f_name):
     if os.path.exists(f_name):
@@ -242,6 +239,22 @@ def get_next_vicon(vicon_iter, usec_offset=0):
     return vicon
 
 
+def euler_angles_to_rotation_matrix(m):
+    M = np.array([
+        [ np.cos(m[0]), np.sin(m[0]), 0],
+        [-np.sin(m[0]), np.cos(m[0]), 0],
+        [ 0,            0,            1]])
+    M = np.dot(M, np.array([
+        [1,  0,            0],
+        [0,  np.cos(m[1]), np.sin(m[1])],
+        [0, -np.sin(m[1]), np.cos(m[1])]]))
+    M = np.dot(M, np.array([
+        [ np.cos(m[2]), np.sin(m[2]), 0],
+        [-np.sin(m[2]), np.cos(m[2]), 0],
+        [ 0,            0,            1]]))
+    return M
+
+
 def projection():
 
     record = False
@@ -320,6 +333,10 @@ def projection():
 
     dv_space_transform_file_name = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
     dv_space_transform = [np.load(file_name) for file_name in dv_space_transform_file_name]
+    dv_space_R = [euler_angles_to_rotation_matrix(dv_space_transform[i][0:3]) for i in range(2)]
+    dv_space_T = [dv_space_transform[i][3:6] for i in range(2)]
+    dv_space_f_scale = [dv_space_transform[i][6] for i in range(2)]
+    dv_space_x_scale = [dv_space_transform[i][7] for i in range(2)]
 
 
     ##################################################################
@@ -445,13 +462,13 @@ def projection():
             rotation = vicon['rotation'][prop_name]
             final_vicon_data['rotation'][prop_name].append([rotation])
             for i in range(2):
-                cam_rotation = rotation + dv_space_transform[i][:3]
+                cam_rotation = rotation + dv_space_R[i]
                 final_vicon_data[f'camera_rotation_{i}'][prop_name].append([cam_rotation])
             for marker_name in props[prop_name].keys():
                 translation = vicon['translation'][prop_name][marker_name]
                 final_vicon_data['translation'][prop_name][marker_name].append([translation])
                 for i in range(2):
-                    cam_translation = vicon_to_camera_centric(translation, dv_space_transform[i])
+                    cam_translation = np.matmul(translation, dv_space_R[i]) + dv_space_T[i] * 10
                     final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name].append([cam_translation])
 
             # check current Vicon frame
@@ -483,7 +500,7 @@ def projection():
                     rotation = f(vicon['timestamp'])
                     final_vicon_data['rotation'][prop_name][-1] = rotation
                     for i in range(2):
-                        cam_rotation = rotation + dv_space_transform[i][:3]
+                        cam_rotation = rotation + dv_space_R[i]
                         final_vicon_data[f'camera_rotation_{i}'][prop_name][-1] = cam_rotation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_translation_buffer[prop_name][marker_name])
@@ -491,7 +508,7 @@ def projection():
                         translation = f(vicon['timestamp'])
                         final_vicon_data['translation'][prop_name][marker_name][-1] = translation
                         for i in range(2):
-                            cam_translation = vicon_to_camera_centric(translation, dv_space_transform[i])
+                            cam_translation = np.matmul(translation, dv_space_R[i]) + dv_space_T[i] * 10
                             final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name][-1] = cam_translation
 
                 else: # bad frame timeout
@@ -657,8 +674,7 @@ def projection():
         print('Vicon frame timestamp: ', vicon['timestamp'])
 
         for prop_name in props.keys():
-            print(f'extrapolated {prop_name}:',
-                  next(final_vicon_iter['extrapolated'][prop_name]))
+            print(f'extrapolated {prop_name}:', next(final_vicon_iter['extrapolated'][prop_name]))
 
             # get mesh and Vicon marker translations for this prop
             x = np.array(list(props[prop_name].values()))
@@ -679,10 +695,13 @@ def projection():
             # transform from Vicon space to DV camera space
             vicon_space_p = np.matmul(mesh[prop_name].vectors, vicon_space_coefficients) + vicon_space_constants
             for i in range(2):
-                dv_space_p = np.empty((vicon_space_p.shape[0], 3, 2), dtype='float64')
-                for j in range(vicon_space_p.shape[0]):
-                    for k in range(3):
-                        dv_space_p[j, k] = vicon_to_dv(vicon_space_p[j, k], dv_space_transform[i])
+                dv_space_p = np.matmul(vicon_space_p, dv_space_R[i]) + dv_space_T[i] * 10
+                dv_space_p[:, :, :2] *= (1 / dv_space_p[:, :, 2, np.newaxis])
+                dv_space_p = dv_space_p[:, :, :2]
+                dv_space_p *= 4 * dv_space_f_scale[i]  # focal length 4 mm
+                dv_space_p /= 1.8e-2                   # 18 micrometer/pixel = 1.8e-2 mm/pixel
+                dv_space_p *= dv_space_x_scale[i]      # allow for some rescaling of x due to camera undistortion
+                dv_space_p += [173, 130]               # add the origin offset from image centre to top left corner
                 dv_space_p_int = np.rint(dv_space_p).astype('int32')
 
                 # compute prop mask
