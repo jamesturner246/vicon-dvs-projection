@@ -385,16 +385,17 @@ def projection():
     # load raw Vicon data
     raw_vicon_file = tables.open_file(raw_vicon_file_name, mode='r')
     raw_vicon_iter = {}
-    raw_vicon_iter['timestamp'] = raw_vicon_file.root.timestamp.iterrows()
+    timestamp = raw_vicon_file.root.timestamp
+    raw_vicon_iter['timestamp'] = timestamp.iterrows()
     raw_vicon_iter['rotation'] = {}
     raw_vicon_iter['translation'] = {}
     for prop_name in props.keys():
-        rotation = raw_vicon_file.root.props[prop_name].rotation.iterrows()
-        raw_vicon_iter['rotation'][prop_name] = rotation
+        rotation = raw_vicon_file.root.props[prop_name].rotation
+        raw_vicon_iter['rotation'][prop_name] = rotation.iterrows()
         raw_vicon_iter['translation'][prop_name] = {}
         for marker_name in props[prop_name].keys():
             translation = raw_vicon_file.root.props[prop_name].translation[marker_name]
-            raw_vicon_iter['translation'][prop_name][marker_name] = translation
+            raw_vicon_iter['translation'][prop_name][marker_name] = translation.iterrows()
 
     # create final Vicon data file
     final_vicon_file, final_vicon_data = create_vicon_file(final_vicon_file_name, props)
