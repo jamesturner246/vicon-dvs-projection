@@ -174,13 +174,8 @@ def get_vicon(record_seconds, address, port, props, f_name):
         data['timestamp'].append([timestamp])
 
         prop_names = props.keys()
-        prop_count = len(prop_names)
-
-        for prop_i in range(prop_count):
-            prop_name = prop_names[prop_i]
-
+        for prop_name in prop_names:
             marker_names = props[prop_name].keys()
-            marker_count = len(marker_names)
 
             try:
                 prop_quality = client.GetObjectQuality(prop_name)
@@ -194,9 +189,7 @@ def get_vicon(record_seconds, address, port, props, f_name):
                 rotation = [(r * 180 / np.pi) + 180 for r in rotation]
                 data['rotation'][prop_name].append([rotation])
 
-                for marker_i in range(marker_count):
-                    marker_name = marker_names[marker_i][0]
-
+                for marker_name in marker_names:
                     translation = client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
                     data['translation'][prop_name][marker_name].append([translation])
 
@@ -204,9 +197,7 @@ def get_vicon(record_seconds, address, port, props, f_name):
                 rotation = np.full(3, np.nan)
                 data['rotation'][prop_name].append([rotation])
 
-                for marker_i in range(marker_count):
-                    marker_name = marker_names[marker_i][0]
-
+                for marker_name in marker_names:
                     translation = np.full(3, np.nan)
                     data['translation'][prop_name][marker_name].append([translation])
 
