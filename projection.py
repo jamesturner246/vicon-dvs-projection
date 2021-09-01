@@ -3,6 +3,7 @@ import os
 import json
 from collections import deque
 from datetime import datetime
+import time
 import pause
 from multiprocessing import Process
 from sklearn.multioutput import MultiOutputRegressor
@@ -97,14 +98,14 @@ def create_vicon_file(f_name, props):
     return f, data
 
 
-def get_events(camera, start_time, end_time, address, port, mtx, dist, f_name):
+def get_events(camera, start_time, stop_time, address, port, mtx, dist, f_name):
     f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
         pause.until(start_time)
 
         for event in event_f:
-            if time.time() >= stop_time
+            if time.time() >= stop_time:
                 break
 
             # undistort event
@@ -121,14 +122,14 @@ def get_events(camera, start_time, end_time, address, port, mtx, dist, f_name):
     return
 
 
-def get_frames(camera, start_time, end_time, address, port, mtx, dist, f_name):
+def get_frames(camera, start_time, stop_time, address, port, mtx, dist, f_name):
     f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
         pause.until(start_time)
 
         for frame in frame_f:
-            if time.time() >= stop_time
+            if time.time() >= stop_time:
                 break
 
             # undistort frame
@@ -144,7 +145,7 @@ def get_frames(camera, start_time, end_time, address, port, mtx, dist, f_name):
     return
 
 
-def get_vicon(start_time, end_time, address, port, props, f_name):
+def get_vicon(start_time, stop_time, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
@@ -368,19 +369,19 @@ def projection():
         for f in os.listdir(path_data):
             os.remove(f'{path_data}/{f}')
 
-        start_time = time.time() + 5
-        end_time = start_time + record_seconds
+        start_time = time.time() + 3
+        stop_time = start_time + record_seconds
 
         processes = []
         for i in range(2):
             processes.append(Process(target=get_events,
-                                     args=(i, start_time, end_time, dv_address, dv_event_port[i],
+                                     args=(i, start_time, stop_time, dv_address, dv_event_port[i],
                                            dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
             processes.append(Process(target=get_frames,
-                                     args=(i, start_time, end_time, dv_address, dv_frame_port[i],
+                                     args=(i, start_time, stop_time, dv_address, dv_frame_port[i],
                                            dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
         processes.append(Process(target=get_vicon,
-                                 args=(start_time, end_time, vicon_address, vicon_port,
+                                 args=(start_time, stop_time, vicon_address, vicon_port,
                                        props, raw_vicon_file_name)))
 
         for p in processes:
@@ -429,19 +430,19 @@ def projection():
         for marker_name in props[prop_name].keys():
             vicon_translation_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
 
-    # get Vicon frames
-    vicon_old = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
     vicon = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
 
     # append to good Vicon frame buffers
     for prop_name in props.keys():
-        timestamp = vicon_old['timestamp']
+        timestamp = vicon['timestamp']
         vicon_timestamp_buffer[prop_name].append(timestamp)
-        rotation = vicon_old['rotation'][prop_name]
+        rotation = vicon['rotation'][prop_name]
         vicon_rotation_buffer[prop_name].append(rotation)
         for marker_name in props[prop_name].keys():
-            translation = vicon_old['translation'][prop_name][marker_name]
+            translation = vicon['translation'][prop_name][marker_name]
             vicon_translation_buffer[prop_name][marker_name].append(translation)
+
+    vicon = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
 
 
     # === PREPROCESS VICON DATA ===
@@ -547,7 +548,6 @@ def projection():
                     vicon_translation_buffer[prop_name][marker_name].append(translation)
 
 
-        vicon_old = vicon
         vicon = vicon_new
 
 
@@ -640,22 +640,28 @@ def projection():
     # frame_video_file = [cv2.VideoWriter(file_name, cv2.VideoWriter_fourcc(*'MJPG'), 30, dv_shape[1::-1])
     #                     for file_name in frame_video_file_name]
 
-    # get Vicon frames
-    vicon_old = get_next_vicon(final_vicon_iter)
+    # get start time
+    event = [get_next_event(raw_event_iter[i], i) for i in range(2)]
+    frame = [get_next_frame(raw_frame_iter[i], i) for i in range(2)]
     vicon = get_next_vicon(final_vicon_iter)
-    vicon_midway = vicon_old['timestamp'] / 2 + vicon['timestamp'] / 2
+
+    start_time = max([event[i][f'timestamp_{i}'] for i in range(2)] +
+                     [frame[i][f'timestamp_{i}'] for i in range(2)] +
+                     [vicon['timestamp']])
 
     # catch up DV events
-    event = [get_next_event(raw_event_iter[i], i) for i in range(2)]
     for i in range(2):
-        while event[i][f'timestamp_{i}'] < vicon_midway:
+        while event[i][f'timestamp_{i}'] < start_time:
             event[i] = get_next_event(raw_event_iter[i], i)
 
     # catch up DV frames
-    frame = [get_next_frame(raw_frame_iter[i], i) for i in range(2)]
     for i in range(2):
-        while frame[i][f'timestamp_{i}'] <= vicon['timestamp']:
+        while frame[i][f'timestamp_{i}'] < start_time:
             frame[i] = get_next_frame(raw_frame_iter[i], i)
+
+    # catch up Vicon frames
+    while vicon['timestamp'] < start_time:
+        vicon = get_next_vicon(final_vicon_iter)
 
 
     # === MAIN LOOP ===
@@ -832,7 +838,6 @@ def projection():
                     done_event[i] = True
 
 
-        vicon_old = vicon
         vicon = vicon_new
 
 
