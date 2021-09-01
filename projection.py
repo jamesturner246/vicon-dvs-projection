@@ -506,7 +506,7 @@ def projection():
 
                     # void bad frame data
                     bad_data = np.full(3, np.nan)
-                    a = max(0, len(final_vicon_data['timestanmp']) - vicon_bad_frame_timeout + 1)
+                    a = max(0, len(final_vicon_data['timestamp']) - vicon_bad_frame_timeout + 1)
                     b = len(final_vicon_data['timestanp'])
                     final_vicon_data['rotation'][prop_name][a:b] = bad_data
                     for i in range(2):
