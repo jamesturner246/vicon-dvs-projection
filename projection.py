@@ -353,7 +353,7 @@ def projection():
         print('=== begin recording ===')
 
         for f in os.listdir(path_data):
-            os.remove(path_data + f)
+            os.remove(f'{path_data}/{f}')
 
         processes = []
         for i in range(2):
@@ -381,6 +381,8 @@ def projection():
     ##################################################################
 
 
+
+    print('begin preprocessing')
 
     # load raw Vicon data
     raw_vicon_file = tables.open_file(raw_vicon_file_name, mode='r')
@@ -471,12 +473,11 @@ def projection():
                 #print('DEBUG: bad frame')
                 bad_frame_count += 1
 
-                if bad_frame_count < vicon_bad_frame_timeout:
+                if bad_frame_count < vicon_bad_frame_timeout and len(vicon_timestamp_buffer[prop_name]) > 1:
                     #print('DEBUG: extrapolating bad frame')
                     final_vicon_data['extrapolated'][prop_name][-1] = True
 
                     x = np.array(vicon_timestamp_buffer[prop_name])
-
                     y = np.array(vicon_rotation_buffer[prop_name])
                     f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
                     rotation = f(vicon['timestamp'])
@@ -504,14 +505,16 @@ def projection():
                         vicon_translation_buffer[prop_name][marker_name].clear()
 
                     # void bad frame data
-                    for i in range(-1, -vicon_bad_frame_timeout, -1):
-                        rotation = np.full((1, 3), np.nan)
-                        final_vicon_data['rotation'][prop_name][i] = rotation
-                        final_vicon_data['camera_rotation'][prop_name][i] = rotation
-                        for marker_name in props[prop_name].keys():
-                            translation = np.full((1, 3), np.nan)
-                            final_vicon_data['translation'][prop_name][marker_name][i] = translation
-                            final_vicon_data['camera_translation'][prop_name][marker_name][i] = translation
+                    bad_data = np.full(3, np.nan)
+                    a = max(0, len(final_vicon_data['timestanmp']) - vicon_bad_frame_timeout + 1)
+                    b = len(final_vicon_data['timestanp'])
+                    final_vicon_data['rotation'][prop_name][a:b] = bad_data
+                    for i in range(2):
+                        final_vicon_data[f'camera_rotation_{i}'][prop_name][a:b] = bad_data
+                    for marker_name in props[prop_name].keys():
+                        final_vicon_data['translation'][prop_name][marker_name][a:b] = bad_data
+                        for i in range(2):
+                            final_vicon_data[f'camera_translation_{i}'][prop_name][marker_name][a:b] = bad_data
 
             # append good Vicon frame to buffer
             if frame_is_good:
@@ -534,6 +537,8 @@ def projection():
 
     raw_vicon_file.close()
     final_vicon_file.close()
+
+    print('finished preprocessing')
 
 
     ##################################################################
@@ -595,12 +600,12 @@ def projection():
     for prop_name in props.keys():
         extrapolated = final_vicon_file.root.props[prop_name].extrapolated
         final_vicon_iter['extrapolated'][prop_name] = extrapolated.iterrows()
-        rotation = final_vicon_file.root.props[prop_name].rotaton
+        rotation = final_vicon_file.root.props[prop_name].rotation
         final_vicon_iter['rotation'][prop_name] = rotation.iterrows()
         final_vicon_iter['translation'][prop_name] = {}
         for marker_name in props[prop_name].keys():
             translation = final_vicon_file.root.props[prop_name].translation[marker_name]
-            final_vicon_iter['translation'][prop_name][marker_name] = translation
+            final_vicon_iter['translation'][prop_name][marker_name] = translation.iterrows()
         for i in range(2):
             camera_rotation = final_vicon_file.root.props[prop_name][f'camera_rotation_{i}']
             final_vicon_iter[f'camera_rotation_{i}'][prop_name] = camera_rotation.iterrows()
@@ -652,7 +657,8 @@ def projection():
         print('Vicon frame timestamp: ', vicon['timestamp'])
 
         for prop_name in props.keys():
-            print('extrapolated:', next(final_vicon_iter['extrapolated'][prop_name]))
+            print(f'extrapolated {prop_name}:',
+                  next(final_vicon_iter['extrapolated'][prop_name]))
 
             # get mesh and Vicon marker translations for this prop
             x = np.array(list(props[prop_name].values()))
