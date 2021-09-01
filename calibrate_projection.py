@@ -425,7 +425,7 @@ def calibrate():
 
     calibrate_projection_method = 2
 
-    reuse = False
+    reuse = True
     debug = False
     test = True
 
