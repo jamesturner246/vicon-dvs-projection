@@ -345,10 +345,12 @@ def projection():
 
     os.makedirs(path_data, exist_ok=True)
 
-    calibration_paths = {'camera_calibration_path': path_camera,
-                         'projection_calibration_path': path_projection}
-    with open('calibration.json', 'w') as calibration_paths_file:
-        json.dump(calibration_paths, calibration_paths_file)
+    info_json = {
+        'time': time.time(),
+        'camera_calibration_path': path_camera,
+        'projection_calibration_path': path_projection}
+    with open(f'{path_data}/info.json', 'w') as info_json_file:
+        json.dump(info_json, info_json_file)
 
     raw_event_file_name = [f'{path_data}/raw_event_{i}.h5' for i in range(n_camera)]
     raw_frame_file_name = [f'{path_data}/raw_frame_{i}.h5' for i in range(n_camera)]
