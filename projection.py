@@ -857,6 +857,8 @@ def projection():
     for i in range(n_camera):
         raw_event_file[i].close()
         raw_frame_file[i].close()
+        final_event_file[i].close()
+        final_frame_file[i].close()
     final_vicon_file.close()
 
     # for i in range(n_camera):
