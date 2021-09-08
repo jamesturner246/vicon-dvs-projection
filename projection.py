@@ -108,7 +108,7 @@ def get_event(camera, vicon_stop, address, port, mtx, dist, f_name):
     with dv.NetworkEventInput(address=address, port=port) as event_f:
         for event in event_f:
             if vicon_stop.value != 0:
-                if event.timestamp > vicon_stop.value + 5000000:
+                if event.timestamp > vicon_stop.value + 50000000:
                     break
 
             # undistort event
@@ -131,7 +131,7 @@ def get_frame(camera, vicon_stop, address, port, mtx, dist, f_name):
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
         for frame in frame_f:
             if vicon_stop.value != 0:
-                if frame.timestamp > vicon_stop.value + 5000000:
+                if frame.timestamp > vicon_stop.value + 50000000:
                     break
 
             # undistort frame
@@ -174,10 +174,12 @@ def get_vicon(record_time, vicon_stop, address, port, props, f_name):
             break
 
     # prepare and wait 3 more seconds
-    print('got start signal')
     start_time = datetime.now().timestamp() + 3
+    start_timestamp = int(start_time * 1000000)
     stop_time = start_time + record_time
-    vicon_stop.value = int(stop_time * 1000000)
+    stop_timestamp = int(stop_time * 1000000)
+    vicon_stop.value = stop_timestamp
+    print(f'vicon start timestamp (usec): {start_timestamp:,}')
     pause.until(start_time)
 
     # begin frame collection
@@ -405,7 +407,7 @@ def projection():
             json.dump(info_json, info_json_file)
 
         proc = []
-        vicon_stop = Value('L', 0)
+        vicon_stop = Value('Q', 0)
         for i in range(n_camera):
             proc.append(Process(target=get_event, args=(
                 i, vicon_stop, dv_address, dv_event_port[i],
@@ -607,8 +609,8 @@ def projection():
     # initialise temp memory
     event_pos = [np.zeros(dv_camera_shape[i], dtype='uint64') for i in range(n_camera)]
     event_neg = [np.zeros(dv_camera_shape[i], dtype='uint64') for i in range(n_camera)]
-    event_image = [np.zeros(dv_camera_shape[i] + [3], dtype='uint8') for i in range(n_camera)]
-    frame_image = [np.zeros(dv_camera_shape[i] + [3], dtype='uint8') for i in range(n_camera)]
+    event_image = [np.zeros(np.hstack((dv_camera_shape[i], [3])), dtype='uint8') for i in range(n_camera)]
+    frame_image = [np.zeros(np.hstack((dv_camera_shape[i], [3])), dtype='uint8') for i in range(n_camera)]
     frame_label = [np.zeros(dv_camera_shape[i], dtype='int8') for i in range(n_camera)]
     frame_label_depth = [np.zeros(dv_camera_shape[i], dtype='float64') for i in range(n_camera)]
     prop_masks = [{name: np.empty(dv_camera_shape[i], dtype='uint8') for name in props.keys()}
@@ -697,7 +699,7 @@ def projection():
                 xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
                 if xy_bounded:
                     image[xy[1], xy[0]] = 255
-            print(f'timestamp: {timestamp:,}', end='\r')
+            print(f'dv event {i} timestamp (usec): {timestamp:,}', end='\r')
 
             cv2.imshow(f'find first event {i}', image)
             k = cv2.waitKey(0)
@@ -713,6 +715,7 @@ def projection():
             elif k == ord('>'):
                 idx = min(idx + 10, length // n - 1)
 
+        print()
         event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         event[i] = get_next_event(raw_event_iter[i], i)
         while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
@@ -727,9 +730,9 @@ def projection():
         length = len(raw_frame_file[i].root[f'timestamp_{i}'])
 
         while True:
-            timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
-            image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
-            print(f'timestamp: {timestamp:,}', end='\r')
+            timestamp = raw_frame_file[i].root[f'timestamp_{i}'][idx]
+            image = raw_frame_file[i].root[f'image_undistorted_{i}'][idx]
+            print(f'dv frame {i} timestamp (usec): {timestamp:,}', end='\r')
 
             cv2.imshow(f'find first frame {i}', image)
             k = cv2.waitKey(0)
@@ -745,6 +748,7 @@ def projection():
             elif k == ord('>'):
                 idx = min(idx + 10, length - 1)
 
+        print()
         frame_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         frame[i] = get_next_frame(raw_frame_iter[i], i)
         while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:

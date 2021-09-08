@@ -632,7 +632,7 @@ def calibrate():
         vicon_client.Connect(f'{vicon_address}:{vicon_port}')
         vicon_client.EnableMarkerData()
 
-        frame_image = [np.empty(dv_camera_shape[i] + [3], dtype='uint8') for i in range(2)]
+        frame_image = [np.empty(np.hstack((dv_camera_shape[i], [3])), dtype='uint8') for i in range(2)]
 
         with contextlib.ExitStack() as stack:
             frame_servers = [stack.enter_context(dv.NetworkFrameInput(
