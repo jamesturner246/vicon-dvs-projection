@@ -711,7 +711,7 @@ def projection():
             for xy in xy_int:
                 image[xy[1], xy[0]] = 255
 
-        event_start_timestamp[i] = timestamp
+        event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         event[i] = get_next_event(raw_event_iter[i], i)
         while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
             event[i] = get_next_event(raw_event_iter[i], i)
@@ -740,7 +740,7 @@ def projection():
             timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
             image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
 
-        frame_start_timestamp[i] = timestamp
+        frame_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         frame[i] = get_next_frame(raw_frame_iter[i], i)
         while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:
             frame[i] = get_next_frame(raw_frame_iter[i], i)
