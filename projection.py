@@ -684,6 +684,7 @@ def projection():
 
 
     # manually find first DV event
+    event = [None for i in range(n_camera)]
     event_start_timestamp = [0 for i in range(n_camera)]
     for i in range(n_camera):
         n = 50
@@ -724,6 +725,7 @@ def projection():
 
 
     # manually find first DV frame
+    frame = [None for i in range(n_camera)]
     frame_start_timestamp = [0 for i in range(n_camera)]
     for i in range(n_camera):
         idx = 0
