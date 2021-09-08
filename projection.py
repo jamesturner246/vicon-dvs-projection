@@ -17,7 +17,7 @@ import cv2
 import dv
 
 
-n_camera = 2
+n_camera = 1
 
 
 def create_event_file(f_name):
@@ -690,16 +690,18 @@ def projection():
         n = 50
         idx = 0
         length = len(raw_event_file[i].root[f'timestamp_{i}'])
-
-        timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
-        xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
-        image = np.zeros(dv_camera_shape[i], dtype='uint8')
-        for xy in xy_int:
-            xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
-            if xy_bounded:
-                image[xy[1], xy[0]] = 255
+        image = np.empty(dv_camera_shape[i], dtype='uint8')
 
         while True:
+            timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
+            xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
+            image.fill(0)
+            for xy in xy_int:
+                xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
+                if xy_bounded:
+                    image[xy[1], xy[0]] = 255
+            print(f'timestamp: {timestamp:,}', end='\r')
+
             cv2.imshow(f'find first event {i}', image)
             k = cv2.waitKey(0)
             if k == ord(' '):
@@ -709,14 +711,6 @@ def projection():
                 idx = max(idx - 1, 0)
             elif k == ord('.'):
                 idx = min(idx + 1, length // n - 1)
-
-            timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
-            xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
-            image.fill(0)
-            for xy in xy_int:
-                xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
-                if xy_bounded:
-                    image[xy[1], xy[0]] = 255
 
         event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         event[i] = get_next_event(raw_event_iter[i], i)
@@ -731,10 +725,11 @@ def projection():
         idx = 0
         length = len(raw_frame_file[i].root[f'timestamp_{i}'])
 
-        timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
-        image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
-
         while True:
+            timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
+            image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
+            print(f'timestamp: {timestamp:,}', end='\r')
+
             cv2.imshow(f'find first frame {i}', image)
             k = cv2.waitKey(0)
             if k == ord(' '):
@@ -744,9 +739,6 @@ def projection():
                 idx = max(idx - 1, 0)
             elif k == ord('.'):
                 idx = min(idx + 1, length - 1)
-
-            timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
-            image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
 
         frame_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         frame[i] = get_next_frame(raw_frame_iter[i], i)
