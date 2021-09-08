@@ -102,13 +102,13 @@ def create_vicon_file(f_name, props):
     return f, data
 
 
-def get_event(camera, vicon_status, address, port, mtx, dist, f_name):
+def get_event(camera, vicon_stop, address, port, mtx, dist, f_name):
     f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
         for event in event_f:
-            if vicon_status.stop_timestamp != 0:
-                if event.timestamp > vicon_status.stop_timestamp + 5000000:
+            if vicon_stop.value != 0:
+                if event.timestamp > vicon_stop.value + 5000000:
                     break
 
             # undistort event
@@ -125,13 +125,13 @@ def get_event(camera, vicon_status, address, port, mtx, dist, f_name):
     return
 
 
-def get_frame(camera, vicon_status, address, port, mtx, dist, f_name):
+def get_frame(camera, vicon_stop, address, port, mtx, dist, f_name):
     f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
         for frame in frame_f:
-            if vicon_status.stop_timestamp != 0:
-                if frame.timestamp > vicon_status.stop_timestamp + 5000000:
+            if vicon_stop.value != 0:
+                if frame.timestamp > vicon_stop.value + 5000000:
                     break
 
             # undistort frame
@@ -147,7 +147,7 @@ def get_frame(camera, vicon_status, address, port, mtx, dist, f_name):
     return
 
 
-def get_vicon(record_time, vicon_status, address, port, props, f_name):
+def get_vicon(record_time, vicon_stop, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
@@ -177,7 +177,7 @@ def get_vicon(record_time, vicon_status, address, port, props, f_name):
     print('got start signal')
     start_time = datetime.now().timestamp() + 3
     stop_time = start_time + record_time
-    vicon_status.stop_timestamp = stop_time * 1000000
+    vicon_stop.value = stop_time * 1000000
     pause.until(start_time)
 
     # begin frame collection
@@ -405,17 +405,17 @@ def projection():
             json.dump(info_json, info_json_file)
 
         proc = []
-        vicon_status = Value('stop_timestamp', 0)
+        vicon_stop = Value('L', 0)
         for i in range(n_camera):
             proc.append(Process(target=get_event, args=(
-                i, vicon_status, dv_address, dv_event_port[i],
+                i, vicon_stop, dv_address, dv_event_port[i],
                 dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
             proc.append(Process(target=get_frame, args=(
-                i, vicon_status, dv_address, dv_frame_port[i],
+                i, vicon_stop, dv_address, dv_frame_port[i],
                 dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
 
         proc.append(Process(target=get_vicon, args=(
-            record_time, vicon_status, vicon_address, vicon_port,
+            record_time, vicon_stop, vicon_address, vicon_port,
             props, raw_vicon_file_name)))
 
         # start processes
