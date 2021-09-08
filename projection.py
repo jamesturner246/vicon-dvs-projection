@@ -420,8 +420,10 @@ def projection():
             p.start()
 
         # send stop signal if Vicon process is done
-        if not processes[-1].is_alive():
-            stop_event.set()
+        while True:
+            if not processes[-1].is_alive():
+                stop_event.set()
+                break
 
         # stop processes
         for p in processes:
@@ -690,9 +692,11 @@ def projection():
 
         timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
         xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
-        image = np.zeros(dv_camera_shape, dtype='uint8')
+        image = np.zeros(dv_camera_shape[i], dtype='uint8')
         for xy in xy_int:
-            image[xy[1], xy[0]] = 255
+            xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
+            if xy_bounded:
+                image[xy[1], xy[0]] = 255
 
         while True:
             cv2.imshow(f'find first event {i}', image)
@@ -709,7 +713,9 @@ def projection():
             xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
             image.fill(0)
             for xy in xy_int:
-                image[xy[1], xy[0]] = 255
+                xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
+                if xy_bounded:
+                    image[xy[1], xy[0]] = 255
 
         event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         event[i] = get_next_event(raw_event_iter[i], i)
@@ -878,7 +884,7 @@ def projection():
                     xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
                     xy_bounded = all(xy_int >= 0) and all(xy_int < dv_camera_shape[i][::-1])
 
-                    if all(xy_bounded):
+                    if xy_bounded:
                         if event[i][f'polarity_{i}']:
                             pos[xy_int[1], xy_int[0]] += 1
                         else:

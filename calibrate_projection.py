@@ -218,7 +218,7 @@ def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dis
         xy_int = np.rint(xy_undistorted).astype('int32')
         xy_bounded = all(xy_int >= 0) and all(xy_int < camera_shape[::-1])
 
-        if all(xy_bounded):
+        if xy_bounded:
             event_image[xy_int[1], xy_int[0]] += 1.0
 
     if debug:
@@ -247,7 +247,7 @@ def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dis
         xy_int = np.rint(xy_undistorted).astype('int32')
         xy_bounded = all(xy_int >= 0) and all(xy_int < camera_shape[::-1])
 
-        if all(xy_bounded):
+        if xy_bounded:
             if event_image_mask[xy_int[1], xy_int[0]] > 0:
                 event_xy_masked[i_event] = xy_undistorted
                 i_event += 1
