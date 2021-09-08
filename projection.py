@@ -6,6 +6,7 @@ from datetime import datetime
 import time
 import pause
 from multiprocessing import Process
+from multiprocessing import Event
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import LinearRegression
 from scipy.interpolate import interp1d
@@ -101,14 +102,12 @@ def create_vicon_file(f_name, props):
     return f, data
 
 
-def get_events(camera, start_time, stop_time, address, port, mtx, dist, f_name):
+def get_events(camera, stop_event, address, port, mtx, dist, f_name):
     f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
-        pause.until(start_time)
-
         for event in event_f:
-            if time.time() >= stop_time:
+            if stop_event.is_set():
                 break
 
             # undistort event
@@ -125,18 +124,16 @@ def get_events(camera, start_time, stop_time, address, port, mtx, dist, f_name):
     return
 
 
-def get_frames(camera, start_time, stop_time, address, port, mtx, dist, f_name):
+def get_frames(camera, stop_event, address, port, mtx, dist, f_name):
     f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
-        pause.until(start_time)
-
         for frame in frame_f:
-            if time.time() >= stop_time:
+            if stop_event.is_set():
                 break
 
             # undistort frame
-            frame_image_raw = frame.image[:, :, :]
+            frame_image_raw = frame.image
             frame_image_undistorted = cv2.undistort(
                 frame_image_raw, mtx, dist, None, mtx)
 
@@ -148,7 +145,7 @@ def get_frames(camera, start_time, stop_time, address, port, mtx, dist, f_name):
     return
 
 
-def get_vicon(start_time, stop_time, address, port, props, f_name):
+def get_vicon(record_time, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
@@ -159,14 +156,37 @@ def get_vicon(start_time, stop_time, address, port, props, f_name):
     client.EnableMarkerData()
     client.EnableSegmentData()
 
-    pause.until(start_time)
-
-    # begin frame collection
-    while time.time() < stop_time:
+    # wait for signal to begin recording
+    print('waiting for signal...')
+    while True:
         if not client.GetFrame():
             continue
 
-        timestamp = int(datetime.now().timestamp() * 1000000)
+        try:
+            prop_quality = client.GetObjectQuality('jt_wand')
+        except ViconDataStream.DataStreamException:
+            prop_quality = None
+
+        # if vicon wand signal is present
+        if prop_quality is not None:
+            break
+
+    # wait three more seconds
+    print('got start signal')
+    start_time = datetime.now().timestamp() + 3
+    start_timestamp = start_time * 1000000
+    stop_time = start_time + record_time
+    current_time = start_time
+    pause.until(start_time)
+
+    # begin frame collection
+    while current_time < stop_time:
+        current_time = datetime.now().timestamp()
+
+        if not client.GetFrame():
+            continue
+
+        timestamp = int(current_time * 1000000) - start_timestamp
         data['timestamp'].append([timestamp])
 
         prop_names = props.keys()
@@ -260,21 +280,24 @@ def projection():
     test_scenario = 'no_human'
     test_number = 0
 
+    date = time.strftime('%Y%m%d')
+    #date = 20210907
+    initials = 'jt'
+
     path_camera = './camera_calibration'
     path_projection = './projection_calibration'
-    path_data = f'./data/{test_scenario}/{test_number:04}'
+    path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
 
-    record_seconds = 10
+    record_time = 10  # in seconds
 
-    #vicon_usec_offset = -155000
-    vicon_usec_offset = -600000
+    vicon_usec_offset = 0
 
     event_distinguish_polarity = False
 
-    #vicon_translation_error_threshold = np.infty  # millimeters
+    #vicon_translation_error_threshold = np.inf    # millimeters
     vicon_translation_error_threshold = 50.0       # millimeters
 
-    vicon_rotation_error_threshold = np.infty      # degrees
+    vicon_rotation_error_threshold = np.inf        # degrees
     #vicon_rotation_error_threshold = 30.0         # degrees
 
     vicon_bad_frame_timeout = 100
@@ -287,6 +310,11 @@ def projection():
     dv_address = '127.0.0.1'
     dv_event_port = [36000, 36001]
     dv_frame_port = [36002, 36003]
+
+    dv_camera_shape = [np.array([260, 346]) for i in range(n_camera)]
+    dv_camera_origin_offset = [dv_camera_shape[i] / 2 for i in range(n_camera)]
+    dv_camera_nominal_focal_length = [4.0 for i in range(n_camera)]
+    dv_camera_pixel_mm = [1.8e-2 for i in range(n_camera)]
 
     props = {}
     mesh = {}
@@ -332,11 +360,11 @@ def projection():
 
     dv_space_transform_file_name = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(n_camera)]
     dv_space_transform = [np.load(file_name) for file_name in dv_space_transform_file_name]
-    dv_space_euler = [dv_space_transform[i][0:3] for i in range(n_camera)]
+    dv_space_euler_angles = [dv_space_transform[i][0:3] for i in range(n_camera)]
     dv_space_R = [euler_angles_to_rotation_matrix(dv_space_transform[i][0:3]) for i in range(n_camera)]
     dv_space_T = [dv_space_transform[i][3:6] for i in range(n_camera)]
-    dv_space_f_scale = [dv_space_transform[i][6] for i in range(n_camera)]
-    dv_space_x_scale = [dv_space_transform[i][7] for i in range(n_camera)]
+    dv_camera_focal_length = [dv_camera_nominal_focal_length[i] * dv_space_transform[i][6] for i in range(n_camera)]
+    dv_camera_x_scale = [dv_space_transform[i][7] for i in range(n_camera)]
 
 
     ##################################################################
@@ -344,13 +372,6 @@ def projection():
     # === DATA FILES ===
 
     os.makedirs(path_data, exist_ok=True)
-
-    info_json = {
-        'time': time.time(),
-        'camera_calibration_path': path_camera,
-        'projection_calibration_path': path_projection}
-    with open(f'{path_data}/info.json', 'w') as info_json_file:
-        json.dump(info_json, info_json_file)
 
     raw_event_file_name = [f'{path_data}/raw_event_{i}.h5' for i in range(n_camera)]
     raw_frame_file_name = [f'{path_data}/raw_frame_{i}.h5' for i in range(n_camera)]
@@ -374,24 +395,35 @@ def projection():
         for f in os.listdir(path_data):
             os.remove(f'{path_data}/{f}')
 
-        start_time = time.time() + 3
-        stop_time = start_time + record_seconds
+        info_json = {
+            'start_time': datetime.now().timestamp(),
+            'camera_calibration_path': path_camera,
+            'projection_calibration_path': path_projection}
+        with open(f'{path_data}/info.json', 'w') as info_json_file:
+            json.dump(info_json, info_json_file)
 
+        stop_event = Event()
         processes = []
         for i in range(n_camera):
             processes.append(Process(target=get_events,
-                                     args=(i, start_time, stop_time, dv_address, dv_event_port[i],
+                                     args=(i, stop_event, dv_address, dv_event_port[i],
                                            dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
             processes.append(Process(target=get_frames,
-                                     args=(i, start_time, stop_time, dv_address, dv_frame_port[i],
+                                     args=(i, stop_event, dv_address, dv_frame_port[i],
                                            dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
         processes.append(Process(target=get_vicon,
-                                 args=(start_time, stop_time, vicon_address, vicon_port,
+                                 args=(record_time, vicon_address, vicon_port,
                                        props, raw_vicon_file_name)))
 
+        # start processes
         for p in processes:
             p.start()
 
+        # send stop signal if Vicon process is done
+        if not processes[-1].is_alive():
+            stop_event.set()
+
+        # stop processes
         for p in processes:
             p.join()
 
@@ -467,7 +499,7 @@ def projection():
             rotation = vicon['rotation'][prop_name]
             final_vicon_data['rotation'][prop_name].append([rotation])
             for i in range(n_camera):
-                cam_rotation = rotation + dv_space_euler[i]
+                cam_rotation = rotation + dv_space_euler_angles[i]
                 final_vicon_data[f'camera_rotation_{i}'][prop_name].append([cam_rotation])
             for marker_name in props[prop_name].keys():
                 translation = vicon['translation'][prop_name][marker_name]
@@ -505,7 +537,7 @@ def projection():
                     rotation = f(vicon['timestamp'])
                     final_vicon_data['rotation'][prop_name][-1] = rotation
                     for i in range(n_camera):
-                        cam_rotation = rotation + dv_space_euler[i]
+                        cam_rotation = rotation + dv_space_euler_angles[i]
                         final_vicon_data[f'camera_rotation_{i}'][prop_name][-1] = cam_rotation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_translation_buffer[prop_name][marker_name])
@@ -567,7 +599,6 @@ def projection():
 
 
     # constants
-    dv_shape = (260, 346, 3)
     blue = (255, 0, 0)
     green = (0, 255, 0)
     red = (0, 0, 255)
@@ -575,12 +606,14 @@ def projection():
     grey = (50, 50, 50)
 
     # initialise temp memory
-    event_pos = [np.zeros(dv_shape[:2], dtype='uint64') for i in range(n_camera)]
-    event_neg = [np.zeros(dv_shape[:2], dtype='uint64') for i in range(n_camera)]
-    event_image = [np.zeros(dv_shape, dtype='uint8') for i in range(n_camera)]
-    frame_image = [np.zeros(dv_shape, dtype='uint8') for i in range(n_camera)]
-    frame_label = [np.zeros(dv_shape[:2], dtype='int8') for i in range(n_camera)]
-    prop_masks = [{name: np.empty(dv_shape[:2], dtype='uint8') for name in props.keys()} for i in range(n_camera)]
+    event_pos = [np.zeros(dv_camera_shape[i], dtype='uint64') for i in range(n_camera)]
+    event_neg = [np.zeros(dv_camera_shape[i], dtype='uint64') for i in range(n_camera)]
+    event_image = [np.zeros(dv_camera_shape[i] + [3], dtype='uint8') for i in range(n_camera)]
+    frame_image = [np.zeros(dv_camera_shape[i] + [3], dtype='uint8') for i in range(n_camera)]
+    frame_label = [np.zeros(dv_camera_shape[i], dtype='int8') for i in range(n_camera)]
+    frame_label_depth = [np.zeros(dv_camera_shape[i], dtype='float64') for i in range(n_camera)]
+    prop_masks = [{name: np.empty(dv_camera_shape[i], dtype='uint8') for name in props.keys()}
+                  for i in range(n_camera)]
 
     # load raw DV event data
     raw_event_file = []
@@ -640,33 +673,82 @@ def projection():
     final_frame_file, final_frame_data = create_frame_file(final_frame_file_name)
 
     # # initialise video recordings
-    # event_video_file = [cv2.VideoWriter(file_name, cv2.VideoWriter_fourcc(*'MJPG'), 30, dv_shape[1::-1])
-    #                     for file_name in event_video_file_name]
-    # frame_video_file = [cv2.VideoWriter(file_name, cv2.VideoWriter_fourcc(*'MJPG'), 30, dv_shape[1::-1])
-    #                     for file_name in frame_video_file_name]
+    # event_video_file = [cv2.VideoWriter(
+    #     event_video_file_name[i], cv2.VideoWriter_fourcc(*'MJPG'),
+    #     30, dv_camera_shape[i][::-1]) for i in range(n_camera)]
+    # frame_video_file = [cv2.VideoWriter(
+    #     frame_video_file_name[i], cv2.VideoWriter_fourcc(*'MJPG'),
+    #     30, dv_camera_shape[i][::-1]) for i in range(n_camera)]
 
-    # get start time
-    event = [get_next_event(raw_event_iter[i], i) for i in range(n_camera)]
-    frame = [get_next_frame(raw_frame_iter[i], i) for i in range(n_camera)]
-    vicon = get_next_vicon(final_vicon_iter)
 
-    start_time = max([event[i][f'timestamp_{i}'] for i in range(n_camera)] +
-                     [frame[i][f'timestamp_{i}'] for i in range(n_camera)] +
-                     [vicon['timestamp']])
-
-    # catch up DV events
+    # manually find first DV event
+    event_start_timestamp = [0 for i in range(n_camera)]
     for i in range(n_camera):
-        while event[i][f'timestamp_{i}'] < start_time:
+        n = 50
+        idx = 0
+        length = len(raw_event_file[i].root[f'timestamp_{i}'])
+
+        timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
+        xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
+        image = np.zeros(dv_camera_shape, dtype='uint8')
+        for xy in xy_int:
+            image[xy[1], xy[0]] = 255
+
+        while True:
+            cv2.imshow(f'find first event {i}', image)
+            k = cv2.waitKey(0)
+            if k == ord(' '):
+                cv2.destroyWindow(f'find first event {i}')
+                break
+            elif k == ord(','):
+                idx = max(idx - 1, 0)
+            elif k == ord('.'):
+                idx = min(idx + 1, length // n - 1)
+
+            timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
+            xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
+            image.fill(0)
+            for xy in xy_int:
+                image[xy[1], xy[0]] = 255
+
+        event_start_timestamp[i] = timestamp
+        event[i] = get_next_event(raw_event_iter[i], i)
+        while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
             event[i] = get_next_event(raw_event_iter[i], i)
 
-    # catch up DV frames
+
+    # manually find first DV frame
+    frame_start_timestamp = [0 for i in range(n_camera)]
     for i in range(n_camera):
-        while frame[i][f'timestamp_{i}'] < start_time:
+        idx = 0
+        length = len(raw_frame_file[i].root[f'timestamp_{i}'])
+
+        timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
+        image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
+
+        while True:
+            cv2.imshow(f'find first frame {i}', image)
+            k = cv2.waitKey(0)
+            if k == ord(' '):
+                cv2.destroyWindow(f'find first frame {i}')
+                break
+            elif k == ord(','):
+                idx = max(idx - 1, 0)
+            elif k == ord('.'):
+                idx = min(idx + 1, length - 1)
+
+            timestamp = raw_frame_file[i].root[f'timestanp_{i}'][idx]
+            image = raw_frame_file[i].root[f'image_undistort_{i}'][idx]
+
+        frame_start_timestamp[i] = timestamp
+        frame[i] = get_next_frame(raw_frame_iter[i], i)
+        while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:
             frame[i] = get_next_frame(raw_frame_iter[i], i)
 
-    # catch up Vicon frames
-    while vicon['timestamp'] < start_time:
-        vicon = get_next_vicon(final_vicon_iter)
+
+    # get first Vicon pose
+    vicon = get_next_vicon(final_vicon_iter)
+
 
 
     # === MAIN LOOP ===
@@ -709,10 +791,10 @@ def projection():
                 dv_space_p = np.matmul(vicon_space_p, dv_space_R[i]) + dv_space_T[i] * 10
                 dv_space_p[:, :, :2] *= (1 / dv_space_p[:, :, 2, np.newaxis])
                 dv_space_p = dv_space_p[:, :, :2]
-                dv_space_p *= 4 * dv_space_f_scale[i]  # focal length 4 mm
-                dv_space_p /= 1.8e-2                   # 18 micrometer/pixel = 1.8e-2 mm/pixel
-                dv_space_p *= dv_space_x_scale[i]      # allow for some rescaling of x due to camera undistortion
-                dv_space_p += [173, 130]               # add the origin offset from image centre to top left corner
+                dv_space_p *= dv_camera_focal_length[i]
+                dv_space_p /= dv_camera_pixel_mm[i]
+                dv_space_p *= dv_camera_x_scale[i]
+                dv_space_p += dv_camera_origin_offset[i][::-1]
                 dv_space_p_int = np.rint(dv_space_p).astype('int32')
 
                 # compute prop mask
@@ -726,26 +808,35 @@ def projection():
         for i in range(n_camera):
             if not done_frame[i]:
 
-                while frame[i][f'timestamp_{i}'] <= vicon['timestamp']:
+                timestamp = frame[i][f'timestamp_{i}'] - frame_start_timestamp[i]
+                while timestamp <= vicon['timestamp']:
                     image = frame_image[i]
                     label = frame_label[i]
+                    label_depth = frame_label_depth[i]
 
                     # mask DV frame image
-                    image[:, :, :] = frame[i][f'image_undistorted_{i}']
+                    image[:] = frame[i][f'image_undistorted_{i}']
                     for prop_name in props.keys():
                         mask = prop_masks[i][prop_name].astype('bool')
                         image[mask, :] = blue
 
                     # get frame label
                     label.fill(0)
+                    label_depth.fill(np.inf)
                     for j in range(len(props)):
                         prop_name = list(props)[j]
                         mask = prop_masks[i][prop_name].astype('bool')
-                        label[label != 0 & mask] = -1 # ambiguous label
-                        label[label == 0 & mask] = j # prop label
+
+                        prop_depth = 0.0
+                        for marker_name in props[prop_name].keys():
+                            marker_depth = vicon[f'camera_translation_{i}'][prop_name][marker_name][2]
+                            prop_depth += marker_depth / len(props[prop_name])
+
+                        label[mask & (prop_depth < label_depth)] = j
+                        label_depth[mask & (prop_depth < label_depth)] = prop_depth
 
                     # record final frame data
-                    final_frame_data[f'timestamp_{i}'].append([frame[i][f'timestamp_{i}']])
+                    final_frame_data[f'timestamp_{i}'].append([timestamp])
                     final_frame_data[f'image_raw_{i}'].append([frame[i][f'image_raw_{i}']])
                     final_frame_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
                     final_frame_data[f'label_{i}'].append([label])
@@ -780,11 +871,12 @@ def projection():
                 pos.fill(0)
                 neg.fill(0)
 
-                while event[i][f'timestamp_{i}'] < vicon_midway:
+                timestamp = event[i][f'timestamp_{i}'] - event_start_timestamp[i]
+                while timestamp < vicon_midway:
 
                     # check DV event is in frame
                     xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
-                    xy_bounded = [0 <= xy_int[0] < dv_shape[1], 0 <= xy_int[1] < dv_shape[0]]
+                    xy_bounded = all(xy_int >= 0) and all(xy_int < dv_camera_shape[i][::-1])
 
                     if all(xy_bounded):
                         if event[i][f'polarity_{i}']:
@@ -802,17 +894,23 @@ def projection():
 
                         # get event label
                         label = 0
+                        label_depth = np.inf
                         for j in range(len(props)):
                             prop_name = list(props)[j]
                             mask = prop_masks[i][prop_name].astype('bool')
+
+                            prop_depth = 0.0
+                            for marker_name in props[prop_name].keys():
+                                marker_depth = vicon[f'camera_translation_{i}'][prop_name][marker_name][2]
+                                prop_depth += marker_depth / len(props[prop_name])
+
                             if mask[xy_int[1], xy_int[0]]:
-                                if label != 0:
-                                    label = -1 # ambiguous label
-                                    break
-                                label = j # prop label
+                                if prop_depth < label_depth:
+                                    label = j
+                                    label_depth = prop_depth
 
                         # record final event data
-                        final_event_data[f'timestamp_{i}'].append([event[i][f'timestamp_{i}']])
+                        final_event_data[f'timestamp_{i}'].append([timestamp])
                         final_event_data[f'polarity_{i}'].append([event[i][f'polarity_{i}']])
                         final_event_data[f'xy_raw_{i}'].append([event[i][f'xy_raw_{i}']])
                         final_event_data[f'xy_undistorted_{i}'].append([event[i][f'xy_undistorted_{i}']])
