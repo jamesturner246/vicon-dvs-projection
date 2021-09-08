@@ -177,7 +177,7 @@ def get_vicon(record_time, vicon_stop, address, port, props, f_name):
     print('got start signal')
     start_time = datetime.now().timestamp() + 3
     stop_time = start_time + record_time
-    vicon_stop.value = stop_time * 1000000
+    vicon_stop.value = int(stop_time * 1000000)
     pause.until(start_time)
 
     # begin frame collection
