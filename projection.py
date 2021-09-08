@@ -6,7 +6,7 @@ from datetime import datetime
 import time
 import pause
 from multiprocessing import Process
-from multiprocessing import Event
+from multiprocessing import Value
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import LinearRegression
 from scipy.interpolate import interp1d
@@ -102,13 +102,14 @@ def create_vicon_file(f_name, props):
     return f, data
 
 
-def get_events(camera, stop_event, address, port, mtx, dist, f_name):
+def get_event(camera, vicon_status, address, port, mtx, dist, f_name):
     f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
         for event in event_f:
-            if stop_event.is_set():
-                break
+            if vicon_status.stop_timestamp != 0:
+                if event.timestamp > vicon_status.stop_timestamp + 5000000:
+                    break
 
             # undistort event
             event_xy_raw = np.array([event.x, event.y], dtype='float64')
@@ -124,13 +125,14 @@ def get_events(camera, stop_event, address, port, mtx, dist, f_name):
     return
 
 
-def get_frames(camera, stop_event, address, port, mtx, dist, f_name):
+def get_frame(camera, vicon_status, address, port, mtx, dist, f_name):
     f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
         for frame in frame_f:
-            if stop_event.is_set():
-                break
+            if vicon_status.stop_timestamp != 0:
+                if frame.timestamp > vicon_status.stop_timestamp + 5000000:
+                    break
 
             # undistort frame
             frame_image_raw = frame.image
@@ -145,7 +147,7 @@ def get_frames(camera, stop_event, address, port, mtx, dist, f_name):
     return
 
 
-def get_vicon(record_time, address, port, props, f_name):
+def get_vicon(record_time, vicon_status, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
@@ -171,22 +173,22 @@ def get_vicon(record_time, address, port, props, f_name):
         if prop_quality is not None:
             break
 
-    # wait three more seconds
+    # prepare and wait 3 more seconds
     print('got start signal')
     start_time = datetime.now().timestamp() + 3
-    start_timestamp = start_time * 1000000
     stop_time = start_time + record_time
-    current_time = start_time
+    vicon_status.stop_timestamp = stop_time * 1000000
     pause.until(start_time)
 
     # begin frame collection
+    current_time = start_time
     while current_time < stop_time:
         current_time = datetime.now().timestamp()
 
         if not client.GetFrame():
             continue
 
-        timestamp = int(current_time * 1000000) - start_timestamp
+        timestamp = int((current_time - start_time) * 1000000)
         data['timestamp'].append([timestamp])
 
         prop_names = props.keys()
@@ -402,31 +404,26 @@ def projection():
         with open(f'{path_data}/info.json', 'w') as info_json_file:
             json.dump(info_json, info_json_file)
 
-        stop_event = Event()
-        processes = []
+        proc = []
+        vicon_status = Value('stop_timestamp', 0)
         for i in range(n_camera):
-            processes.append(Process(target=get_events,
-                                     args=(i, stop_event, dv_address, dv_event_port[i],
-                                           dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
-            processes.append(Process(target=get_frames,
-                                     args=(i, stop_event, dv_address, dv_frame_port[i],
-                                           dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
-        processes.append(Process(target=get_vicon,
-                                 args=(record_time, vicon_address, vicon_port,
-                                       props, raw_vicon_file_name)))
+            proc.append(Process(target=get_event, args=(
+                i, vicon_status, dv_address, dv_event_port[i],
+                dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
+            proc.append(Process(target=get_frame, args=(
+                i, vicon_status, dv_address, dv_frame_port[i],
+                dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
+
+        proc.append(Process(target=get_vicon, args=(
+            record_time, vicon_status, vicon_address, vicon_port,
+            props, raw_vicon_file_name)))
 
         # start processes
-        for p in processes:
+        for p in proc:
             p.start()
 
-        # send stop signal if Vicon process is done
-        while True:
-            if not processes[-1].is_alive():
-                stop_event.set()
-                break
-
-        # stop processes
-        for p in processes:
+        # wait for processes
+        for p in proc:
             p.join()
 
         print('=== end recording ===')
