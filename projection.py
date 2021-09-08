@@ -709,8 +709,12 @@ def projection():
                 break
             elif k == ord(','):
                 idx = max(idx - 1, 0)
+            elif k == ord('<'):
+                idx = max(idx - 10, 0)
             elif k == ord('.'):
                 idx = min(idx + 1, length // n - 1)
+            elif k == ord('>'):
+                idx = min(idx + 10, length // n - 1)
 
         event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         event[i] = get_next_event(raw_event_iter[i], i)
@@ -737,8 +741,12 @@ def projection():
                 break
             elif k == ord(','):
                 idx = max(idx - 1, 0)
+            elif k == ord('<'):
+                idx = max(idx - 10, 0)
             elif k == ord('.'):
                 idx = min(idx + 1, length - 1)
+            elif k == ord('>'):
+                idx = min(idx + 10, length - 1)
 
         frame_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
         frame[i] = get_next_frame(raw_frame_iter[i], i)
