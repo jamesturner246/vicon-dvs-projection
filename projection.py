@@ -308,7 +308,7 @@ def projection():
     event_distinguish_polarity = False
 
     #vicon_translation_error_threshold = np.inf    # millimeters
-    vicon_translation_error_threshold = 50.0       # millimeters
+    vicon_translation_error_threshold = 30.0       # millimeters
 
     vicon_rotation_error_threshold = np.inf        # degrees
     #vicon_rotation_error_threshold = 30.0         # degrees
@@ -350,14 +350,14 @@ def projection():
     }
     mesh['jt_screwdriver'] = stl.mesh.Mesh.from_file('./props/screwdriver.stl')
 
-    # mallet mesh marker coordinates
-    props['jt_mallet'] = {
-        'shaft_base':  [ 0.0,   9.0,  164.0 ],
-        'shaft_tip':   [ 0.0,  -9.0,  214.0 ],
-        'head_1':      [-40.0,  0.0,  276.5 ],
-        'head_2':      [ 40.0,  0.0,  276.5 ],
-    }
-    mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl')
+    # # mallet mesh marker coordinates
+    # props['jt_mallet'] = {
+    #     'shaft_base':  [ 0.0,   9.0,  164.0 ],
+    #     'shaft_tip':   [ 0.0,  -9.0,  214.0 ],
+    #     'head_1':      [-40.0,  0.0,  276.5 ],
+    #     'head_2':      [ 40.0,  0.0,  276.5 ],
+    # }
+    # mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl')
 
 
 
@@ -722,11 +722,11 @@ def projection():
             elif k == ord(','):
                 idx = max(idx - 1, 0)
             elif k == ord('<'):
-                idx = max(idx - 10, 0)
+                idx = max(idx - 50, 0)
             elif k == ord('.'):
                 idx = min(idx + 1, length // n - 1)
             elif k == ord('>'):
-                idx = min(idx + 10, length // n - 1)
+                idx = min(idx + 50, length // n - 1)
 
         print()
         event_start_timestamp[i] = np.uint64(timestamp + 3000000) # plus 3 seconds
@@ -755,11 +755,11 @@ def projection():
             elif k == ord(','):
                 idx = max(idx - 1, 0)
             elif k == ord('<'):
-                idx = max(idx - 10, 0)
+                idx = max(idx - 50, 0)
             elif k == ord('.'):
                 idx = min(idx + 1, length - 1)
             elif k == ord('>'):
-                idx = min(idx + 10, length - 1)
+                idx = min(idx + 50, length - 1)
 
         print()
         frame_start_timestamp[i] = np.uint64(timestamp + 3000000) # plus 3 seconds
@@ -788,7 +788,7 @@ def projection():
         print('Vicon frame timestamp: ', vicon['timestamp'])
 
         for prop_name in props.keys():
-            #print(f'extrapolated {prop_name}:', next(final_vicon_iter['extrapolated'][prop_name]))
+            #print(f'DEBUG: extrapolated {prop_name}:', vicon['extrapolated'][prop_name])
 
             # get mesh and Vicon marker translations for this prop
             x = np.array(list(props[prop_name].values()))
