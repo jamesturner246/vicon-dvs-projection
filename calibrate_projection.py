@@ -408,7 +408,27 @@ def euler_angles_to_rotation_matrix(m):
         [ 0,            0,            1]]))
     return M
 
-
+def rotation_matrix_to_euler_angles(M):
+    tolerance= 1e-10
+    m= np.empty(3)   
+    m[0]= np.arctan(M[0,2]/M[1,2])
+    m[1]= np.arccos(M[2,2])
+    m[2]= np.arctan(-M[2,0]/M[2,1])
+    # problem: Euler angles alpha and gamma are [-pi, pi] not just [-pi/2, pi/2] as produced by arctan. Need to find out whether we have the right angle for alpha and gamma:
+    # M[0,2] == sin(m[0])*sin(m[1]) can be used to check m[0] - it needs to produce the right sign
+    if M[0,2]*np.sin(m[0])*np.sin(m[1]) < 0.0:
+        if m[0] > 0.0:
+            m[0]= m[0]-np.pi
+        else:
+            m[0]= m[0]+np.pi
+    # M[2,0] == sin(m[1])*sin(m[2]) can be used to check m[2] - it needs to produce the right sign
+    if M[2,0]*np.sin(m[1])*np.sin(m[2]) < 0.0:
+        if m[2] > 0.0:
+            m[2]= m[2]-np.pi
+        else:
+            m[2]= m[2]+np.pi
+    return m
+        
 def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_offset, nominal_focal_length, pixel_mm):
     assert dv_p.shape[0] == vicon_p.shape[0]
 
