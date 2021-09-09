@@ -445,7 +445,7 @@ def rotation_matrix_to_euler_angles(M):
 
 
 """
-Vicon Euler anglesappear to be Tait-Bryan angles:
+Vicon Euler angles appear to be Tait-Bryan angles:
 m[0] - rotation around x axis in [-pi, pi]
 m[1] - rotation around (new) y axis [-pi/2, pi/2]
 m[2] - rotation around (new) z axis [-pi, pi]
@@ -467,6 +467,27 @@ def tait_bryan_angles_to_rotation_matrix(m):
         [ 0, 0, 1]]))
     return M
         
+def rotation_matrix_to_tait_bryan_angles(M):
+    tolerance= 1e-10
+    m= np.empty(3)   
+    m[0]= np.arctan(M[1,2]/M[2,2])
+    m[1]= np.arcsin(M[0,2])
+    m[2]= np.arctan(M[0,1]/M[0,0])
+    # problem: Tait-Bryan angles alpha and gamma are [-pi, pi] not just [-pi/2, pi/2] as produced by arctan. Need to find out whether we have the right angle for alpha and gamma:
+    # M[1,2] == sin(m[0])*cos(m[1]) can be used to check m[0] - it needs to produce the correct sign
+    if M[1,2]*np.sin(m[0])*np.cos(m[1]) < 0.0:
+        if m[0] > 0.0:
+            m[0]= m[0]-np.pi
+        else:
+            m[0]= m[0]+np.pi
+    # M[0,1] == cos(m[1])*sin(m[2]) can be used to check m[2] - it needs to produce the correct sign
+    if M[0,1]*np.cos(m[1])*np.sin(m[2]) < 0.0:
+        if m[2] > 0.0:
+            m[2]= m[2]-np.pi
+        else:
+            m[2]= m[2]+np.pi
+    return m
+
 
 def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_offset, nominal_focal_length, pixel_mm):
     assert dv_p.shape[0] == vicon_p.shape[0]
