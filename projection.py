@@ -697,9 +697,9 @@ def projection():
 
     # manually find first DV event
     event = [None for i in range(n_camera)]
-    event_start_timestamp = [0 for i in range(n_camera)]
+    event_start_timestamp = [None for i in range(n_camera)]
     for i in range(n_camera):
-        n = 50
+        n = 30
         idx = 0
         length = len(raw_event_file[i].root[f'timestamp_{i}'])
         image = np.empty(dv_camera_shape[i], dtype='uint8')
@@ -729,7 +729,7 @@ def projection():
                 idx = min(idx + 10, length // n - 1)
 
         print()
-        event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
+        event_start_timestamp[i] = np.uint64(timestamp + 3000000) # plus 3 seconds
         event[i] = get_next_event(i, raw_event_iter[i])
         while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
             event[i] = get_next_event(i, raw_event_iter[i])
@@ -737,7 +737,7 @@ def projection():
 
     # manually find first DV frame
     frame = [None for i in range(n_camera)]
-    frame_start_timestamp = [0 for i in range(n_camera)]
+    frame_start_timestamp = [None for i in range(n_camera)]
     for i in range(n_camera):
         idx = 0
         length = len(raw_frame_file[i].root[f'timestamp_{i}'])
@@ -762,7 +762,7 @@ def projection():
                 idx = min(idx + 10, length - 1)
 
         print()
-        frame_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
+        frame_start_timestamp[i] = np.uint64(timestamp + 3000000) # plus 3 seconds
         frame[i] = get_next_frame(i, raw_frame_iter[i])
         while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:
             frame[i] = get_next_frame(i, raw_frame_iter[i])
@@ -879,6 +879,8 @@ def projection():
                         done_frame[i] = True
                         break
 
+                    timestamp = frame[i][f'timestamp_{i}'] - frame_start_timestamp[i]
+
 
 
         # process DV events
@@ -943,6 +945,8 @@ def projection():
                     except StopIteration:
                         done_event[i] = True
                         break
+
+                    timestamp = event[i][f'timestamp_{i}'] - event_start_timestamp[i]
 
 
                 # fill DV event image with events, then mask it
