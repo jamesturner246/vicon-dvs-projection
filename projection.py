@@ -228,9 +228,9 @@ def get_vicon(record_time, vicon_stop, address, port, props, f_name):
     return
 
 
-def get_next_event(event_iter, camera, usec_offset=0):
+def get_next_event(camera, event_iter):
     event = {}
-    event[f'timestamp_{camera}'] = np.uint64(next(event_iter[f'timestamp_{camera}']) + usec_offset)
+    event[f'timestamp_{camera}'] = next(event_iter[f'timestamp_{camera}'])
     event[f'polarity_{camera}'] = next(event_iter[f'polarity_{camera}'])
     event[f'xy_raw_{camera}'] = next(event_iter[f'xy_raw_{camera}'])
     event[f'xy_undistorted_{camera}'] = next(event_iter[f'xy_undistorted_{camera}'])
@@ -238,27 +238,53 @@ def get_next_event(event_iter, camera, usec_offset=0):
     return event
 
 
-def get_next_frame(frame_iter, camera, usec_offset=0):
+def get_next_frame(camera, frame_iter):
     frame = {}
-    frame[f'timestamp_{camera}'] = np.uint64(next(frame_iter[f'timestamp_{camera}']) + usec_offset)
+    frame[f'timestamp_{camera}'] = next(frame_iter[f'timestamp_{camera}'])
     frame[f'image_raw_{camera}'] = next(frame_iter[f'image_raw_{camera}'])
     frame[f'image_undistorted_{camera}'] = next(frame_iter[f'image_undistorted_{camera}'])
 
     return frame
 
 
-def get_next_vicon(vicon_iter, usec_offset=0):
+def get_next_vicon(vicon_iter):
     vicon = {}
-    vicon['timestamp'] = np.uint64(next(vicon_iter['timestamp']) + usec_offset)
-    vicon['rotation'] = {}
-    for prop_name in vicon_iter['rotation'].keys():
-        vicon['rotation'][prop_name] = next(vicon_iter['rotation'][prop_name])
-    vicon['translation'] = {}
-    for prop_name in vicon_iter['translation'].keys():
-        vicon['translation'][prop_name] = {}
-        for marker_name in vicon_iter['translation'][prop_name].keys():
-            vicon['translation'][prop_name][marker_name] = next(
-                vicon_iter['translation'][prop_name][marker_name])
+
+    if 'timestamp' in vicon_iter:
+        vicon['timestamp'] = next(vicon_iter['timestamp'])
+
+    if 'extrapolated' in vicon_iter:
+        vicon['extrapolated'] = {}
+        for prop_name in vicon_iter['extrapolated'].keys():
+            vicon['extrapolated'][prop_name] = next(vicon_iter['extrapolated'][prop_name])
+
+    if 'rotation' in vicon_iter:
+        vicon['rotation'] = {}
+        for prop_name in vicon_iter['rotation'].keys():
+            vicon['rotation'][prop_name] = next(vicon_iter['rotation'][prop_name])
+
+    for i in range(n_camera):
+        if f'camera_rotation_{i}' in vicon_iter:
+            vicon[f'camera_rotation_{i}'] = {}
+            for prop_name in vicon_iter[f'camera_rotation_{i}'].keys():
+                vicon[f'camera_rotation_{i}'][prop_name] = next(vicon_iter[f'camera_rotation_{i}'][prop_name])
+
+    if 'translation' in vicon_iter:
+        vicon['translation'] = {}
+        for prop_name in vicon_iter['translation'].keys():
+            vicon['translation'][prop_name] = {}
+            for marker_name in vicon_iter['translation'][prop_name].keys():
+                vicon['translation'][prop_name][marker_name] = next(
+                    vicon_iter['translation'][prop_name][marker_name])
+
+    for i in range(n_camera):
+        if f'camera_translation_{i}' in vicon_iter:
+            vicon[f'camera_translation_{i}'] = {}
+            for prop_name in vicon_iter[f'camera_translation_{i}'].keys():
+                vicon[f'camera_translation_{i}'][prop_name] = {}
+                for marker_name in vicon_iter[f'camera_translation_{i}'][prop_name].keys():
+                    vicon[f'camera_translation_{i}'][prop_name][marker_name] = next(
+                        vicon_iter[f'camera_translation_{i}'][prop_name][marker_name])
 
     return vicon
 
@@ -278,8 +304,6 @@ def projection():
     path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
 
     record_time = 10  # in seconds
-
-    vicon_usec_offset = 0
 
     event_distinguish_polarity = False
 
@@ -453,7 +477,7 @@ def projection():
         for marker_name in props[prop_name].keys():
             vicon_translation_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
 
-    vicon = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
+    vicon = get_next_vicon(raw_vicon_iter)
 
     # append to good Vicon frame buffers
     for prop_name in props.keys():
@@ -465,7 +489,7 @@ def projection():
             translation = vicon['translation'][prop_name][marker_name]
             vicon_translation_buffer[prop_name][marker_name].append(translation)
 
-    vicon = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
+    vicon = get_next_vicon(raw_vicon_iter)
 
 
     # === PREPROCESS VICON DATA ===
@@ -473,7 +497,7 @@ def projection():
     while True:
 
         try:
-            vicon_new = get_next_vicon(raw_vicon_iter, usec_offset=vicon_usec_offset)
+            vicon_new = get_next_vicon(raw_vicon_iter)
         except StopIteration:
             break
 
@@ -706,9 +730,9 @@ def projection():
 
         print()
         event_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
-        event[i] = get_next_event(raw_event_iter[i], i)
+        event[i] = get_next_event(i, raw_event_iter[i])
         while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
-            event[i] = get_next_event(raw_event_iter[i], i)
+            event[i] = get_next_event(i, raw_event_iter[i])
 
 
     # manually find first DV frame
@@ -739,9 +763,9 @@ def projection():
 
         print()
         frame_start_timestamp[i] = timestamp + 3000000 # plus 3 seconds
-        frame[i] = get_next_frame(raw_frame_iter[i], i)
+        frame[i] = get_next_frame(i, raw_frame_iter[i])
         while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:
-            frame[i] = get_next_frame(raw_frame_iter[i], i)
+            frame[i] = get_next_frame(i, raw_frame_iter[i])
 
 
     # get first Vicon pose
@@ -850,7 +874,7 @@ def projection():
                         done_frame[i] = True
 
                     try:
-                        frame[i] = get_next_frame(raw_frame_iter[i], i)
+                        frame[i] = get_next_frame(i, raw_frame_iter[i])
                     except StopIteration:
                         done_frame[i] = True
                         break
@@ -915,7 +939,7 @@ def projection():
                         final_event_data[f'label_{i}'].append([label])
 
                     try:
-                        event[i] = get_next_event(raw_event_iter[i], i)
+                        event[i] = get_next_event(i, raw_event_iter[i])
                     except StopIteration:
                         done_event[i] = True
                         break
