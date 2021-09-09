@@ -414,6 +414,7 @@ def euler_angles_to_rotation_matrix(m):
         [ 0,            0,            1]]))
     return M
 
+
 """
 Note that we are using ranges for Euler angles as follows:
 m[0] (alpha) in [-pi, pi]
@@ -441,7 +442,32 @@ def rotation_matrix_to_euler_angles(M):
         else:
             m[2]= m[2]+np.pi
     return m
+
+
+"""
+Vicon Euler anglesappear to be Tait-Bryan angles:
+m[0] - rotation around x axis in [-pi, pi]
+m[1] - rotation around (new) y axis [-pi/2, pi/2]
+m[2] - rotation around (new) z axis [-pi, pi]
+positive angles are counter-clockwise if looking towards the origin
+"""
+
+def tait_bryan_angles_to_rotation_matrix(m):
+    M= np.array([
+        [ 1, 0, 0],
+        [ 0, np.cos(m[0]), np.sin(m[0])],
+        [ 0, -np.sin(m[0]), np.cos(m[0])]])
+    M= np.dot(M, np.array([
+        [ np.cos(m[1]), 0, np.sin(m[1])],
+        [ 0, 1, 0 ],
+        [ -np.sin(m[1]), 0, np.cos(m[1])]]))
+    M= np.dot(M, np.array([
+        [ np.cos(m[2]), np.sin(m[2]), 0],
+        [ -np.sin(m[2]), np.cos(m[2]), 0],
+        [ 0, 0, 1]]))
+    return M
         
+
 def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_offset, nominal_focal_length, pixel_mm):
     assert dv_p.shape[0] == vicon_p.shape[0]
 
