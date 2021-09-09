@@ -500,7 +500,8 @@ def projection():
             rotation = vicon['rotation'][prop_name]
             final_vicon_data['rotation'][prop_name].append([rotation])
             for i in range(n_camera):
-                cam_rotation = rotation + dv_space_euler_angles[i]
+                #cam_rotation = rotation + dv_space_euler_angles[i]
+                cam_rotation= rotation_matrix_to_euler_angles(np.dot(euler_angles_to_rotation_matrix(rotation),euler_angles_to_rotation_matrix(dv_space_euler_angles[i])))
                 final_vicon_data[f'camera_rotation_{i}'][prop_name].append([cam_rotation])
             for marker_name in props[prop_name].keys():
                 translation = vicon['translation'][prop_name][marker_name]
@@ -538,7 +539,8 @@ def projection():
                     rotation = f(vicon['timestamp'])
                     final_vicon_data['rotation'][prop_name][-1] = rotation
                     for i in range(n_camera):
-                        cam_rotation = rotation + dv_space_euler_angles[i]
+                        #cam_rotation = rotation + dv_space_euler_angles[i]
+                        cam_rotation= rotation_matrix_to_euler_angles(np.dot(euler_angles_to_rotation_matrix(rotation),euler_angles_to_rotation_matrix(dv_space_euler_angles[i])))
                         final_vicon_data[f'camera_rotation_{i}'][prop_name][-1] = cam_rotation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_translation_buffer[prop_name][marker_name])

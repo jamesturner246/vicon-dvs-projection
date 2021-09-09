@@ -415,13 +415,13 @@ def rotation_matrix_to_euler_angles(M):
     m[1]= np.arccos(M[2,2])
     m[2]= np.arctan(-M[2,0]/M[2,1])
     # problem: Euler angles alpha and gamma are [-pi, pi] not just [-pi/2, pi/2] as produced by arctan. Need to find out whether we have the right angle for alpha and gamma:
-    # M[0,2] == sin(m[0])*sin(m[1]) can be used to check m[0] - it needs to produce the right sign
+    # M[0,2] == sin(m[0])*sin(m[1]) can be used to check m[0] - it needs to produce the correct sign
     if M[0,2]*np.sin(m[0])*np.sin(m[1]) < 0.0:
         if m[0] > 0.0:
             m[0]= m[0]-np.pi
         else:
             m[0]= m[0]+np.pi
-    # M[2,0] == sin(m[1])*sin(m[2]) can be used to check m[2] - it needs to produce the right sign
+    # M[2,0] == sin(m[1])*sin(m[2]) can be used to check m[2] - it needs to produce the correct sign
     if M[2,0]*np.sin(m[1])*np.sin(m[2]) < 0.0:
         if m[2] > 0.0:
             m[2]= m[2]-np.pi
