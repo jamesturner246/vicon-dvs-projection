@@ -405,7 +405,7 @@ def euler_angles_to_rotation_matrix(m):
         [-np.sin(m[0]), np.cos(m[0]), 0],
         [ 0,            0,            1]])
     M = np.dot(M, np.array([
-        [1,  0,            0],
+        [1,             0,            0],
         [0,  np.cos(m[1]), np.sin(m[1])],
         [0, -np.sin(m[1]), np.cos(m[1])]]))
     M = np.dot(M, np.array([

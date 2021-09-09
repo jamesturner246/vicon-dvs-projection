@@ -16,6 +16,8 @@ import stl
 import cv2
 import dv
 
+from calibrate_projection import euler_angles_to_rotation_matrix
+from calibrate_projection import rotation_matrix_to_euler_angles
 
 n_camera = 1
 
@@ -206,7 +208,6 @@ def get_vicon(record_time, vicon_stop, address, port, props, f_name):
                 root_segment = client.GetSubjectRootSegmentName(prop_name)
 
                 rotation = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
-                rotation = [(r * 180 / np.pi) + 180 for r in rotation]
                 data['rotation'][prop_name].append([rotation])
 
                 for marker_name in marker_names:
@@ -260,22 +261,6 @@ def get_next_vicon(vicon_iter, usec_offset=0):
                 vicon_iter['translation'][prop_name][marker_name])
 
     return vicon
-
-
-def euler_angles_to_rotation_matrix(m):
-    M = np.array([
-        [ np.cos(m[0]), np.sin(m[0]), 0],
-        [-np.sin(m[0]), np.cos(m[0]), 0],
-        [ 0,            0,            1]])
-    M = np.dot(M, np.array([
-        [1,  0,            0],
-        [0,  np.cos(m[1]), np.sin(m[1])],
-        [0, -np.sin(m[1]), np.cos(m[1])]]))
-    M = np.dot(M, np.array([
-        [ np.cos(m[2]), np.sin(m[2]), 0],
-        [-np.sin(m[2]), np.cos(m[2]), 0],
-        [ 0,            0,            1]]))
-    return M
 
 
 def projection():
@@ -500,8 +485,9 @@ def projection():
             rotation = vicon['rotation'][prop_name]
             final_vicon_data['rotation'][prop_name].append([rotation])
             for i in range(n_camera):
-                #cam_rotation = rotation + dv_space_euler_angles[i]
-                cam_rotation= rotation_matrix_to_euler_angles(np.dot(euler_angles_to_rotation_matrix(rotation),euler_angles_to_rotation_matrix(dv_space_euler_angles[i])))
+                cam_rotation = rotation_matrix_to_euler_angles(
+                    np.dot(euler_angles_to_rotation_matrix(rotation),
+                           euler_angles_to_rotation_matrix(dv_space_euler_angles[i])))
                 final_vicon_data[f'camera_rotation_{i}'][prop_name].append([cam_rotation])
             for marker_name in props[prop_name].keys():
                 translation = vicon['translation'][prop_name][marker_name]
@@ -539,8 +525,9 @@ def projection():
                     rotation = f(vicon['timestamp'])
                     final_vicon_data['rotation'][prop_name][-1] = rotation
                     for i in range(n_camera):
-                        #cam_rotation = rotation + dv_space_euler_angles[i]
-                        cam_rotation= rotation_matrix_to_euler_angles(np.dot(euler_angles_to_rotation_matrix(rotation),euler_angles_to_rotation_matrix(dv_space_euler_angles[i])))
+                        cam_rotation = rotation_matrix_to_euler_angles(
+                            np.dot(euler_angles_to_rotation_matrix(rotation),
+                                   euler_angles_to_rotation_matrix(dv_space_euler_angles[i])))
                         final_vicon_data[f'camera_rotation_{i}'][prop_name][-1] = cam_rotation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_translation_buffer[prop_name][marker_name])
