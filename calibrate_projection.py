@@ -393,6 +393,12 @@ def vicon_to_camera_centric_method_2(v, m):
     return z
 
 
+"""
+We use a convention where vectors as row vectors and matrices are multipied from the right.
+As for Euler angles we use the z1 -> x′ -> z2″ convention corresponding to the product
+Z(m[0])*X(m[1])*Z(m[2])
+"""  
+
 def euler_angles_to_rotation_matrix(m):
     M = np.array([
         [ np.cos(m[0]), np.sin(m[0]), 0],
@@ -407,6 +413,13 @@ def euler_angles_to_rotation_matrix(m):
         [-np.sin(m[2]), np.cos(m[2]), 0],
         [ 0,            0,            1]]))
     return M
+
+"""
+Note that we are using ranges for Euler angles as follows:
+m[0] (alpha) in [-pi, pi]
+m[1] (beta) in [0, pi]
+m[2] (gamma) in [-pi, pi]
+"""
 
 def rotation_matrix_to_euler_angles(M):
     tolerance= 1e-10
