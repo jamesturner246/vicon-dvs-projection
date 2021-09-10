@@ -6,7 +6,6 @@ from datetime import datetime
 import time
 import pause
 from multiprocessing import Process
-from multiprocessing import Value
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import LinearRegression
 from scipy.interpolate import interp1d
@@ -104,14 +103,16 @@ def create_vicon_file(f_name, props):
     return f, data
 
 
-def get_event(camera, vicon_stop, address, port, mtx, dist, f_name):
+def get_event(camera, record_time, address, port, mtx, dist, f_name):
     f, data = create_event_file(f_name)
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
+        event = next(event_f)
+        stop_timestamp = event_timestamp + int(record_time * 1000000)
+
         for event in event_f:
-            if vicon_stop.value != 0:
-                if event.timestamp > vicon_stop.value + 50000000:
-                    break
+            if event.timestamp >= stop_timestamp:
+                break
 
             # undistort event
             event_xy_raw = np.array([event.x, event.y], dtype='float64')
@@ -127,14 +128,16 @@ def get_event(camera, vicon_stop, address, port, mtx, dist, f_name):
     return
 
 
-def get_frame(camera, vicon_stop, address, port, mtx, dist, f_name):
+def get_frame(camera, record_time, address, port, mtx, dist, f_name):
     f, data = create_frame_file(f_name)
 
     with dv.NetworkFrameInput(address=address, port=port) as frame_f:
+        frame = next(frame_f)
+        stop_timestamp = frame.timestamp + int(record_time * 1000000)
+
         for frame in frame_f:
-            if vicon_stop.value != 0:
-                if frame.timestamp > vicon_stop.value + 50000000:
-                    break
+            if frame.timestamp >= stop_timestamp:
+                break
 
             # undistort frame
             frame_image_raw = frame.image
@@ -149,7 +152,7 @@ def get_frame(camera, vicon_stop, address, port, mtx, dist, f_name):
     return
 
 
-def get_vicon(record_time, vicon_stop, address, port, props, f_name):
+def get_vicon(record_time, address, port, props, f_name):
 
     from vicon_dssdk import ViconDataStream
 
@@ -175,12 +178,12 @@ def get_vicon(record_time, vicon_stop, address, port, props, f_name):
         if prop_quality is not None:
             break
 
-    # prepare and wait 3 more seconds
+    # compute start and stop times
     start_time = datetime.now().timestamp() + 3
-    start_timestamp = int(start_time * 1000000)
     stop_time = start_time + record_time
-    stop_timestamp = int(stop_time * 1000000)
-    vicon_stop.value = stop_timestamp
+
+    # wait until start time
+    start_timestamp = int(start_time * 1000000)
     print(f'vicon start timestamp (usec): {start_timestamp:,}')
     pause.until(start_time)
 
@@ -303,7 +306,8 @@ def projection():
     path_projection = './projection_calibration'
     path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
 
-    record_time = 10  # in seconds
+    vicon_record_time = 10  # in seconds
+    dv_record_time = 60     # in seconds (set much higher)
 
     event_distinguish_polarity = False
 
@@ -416,17 +420,16 @@ def projection():
             json.dump(info_json, info_json_file)
 
         proc = []
-        vicon_stop = Value('Q', 0)
         for i in range(n_camera):
             proc.append(Process(target=get_event, args=(
-                i, vicon_stop, dv_address, dv_event_port[i],
+                i, dv_record_time, dv_address, dv_event_port[i],
                 dv_camera_mtx[i], dv_camera_dist[i], raw_event_file_name[i])))
             proc.append(Process(target=get_frame, args=(
-                i, vicon_stop, dv_address, dv_frame_port[i],
+                i, dv_record_time, dv_address, dv_frame_port[i],
                 dv_camera_mtx[i], dv_camera_dist[i], raw_frame_file_name[i])))
 
         proc.append(Process(target=get_vicon, args=(
-            record_time, vicon_stop, vicon_address, vicon_port,
+            vicon_record_time, vicon_address, vicon_port,
             props, raw_vicon_file_name)))
 
         # start processes
@@ -706,13 +709,14 @@ def projection():
 
         while True:
             timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
-            xy_int = np.rint(raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]).astype('int32')
+            xy = raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]
+            xy_int = np.rint(xy).astype('int32')
             image.fill(0)
             for xy in xy_int:
                 xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
                 if xy_bounded:
                     image[xy[1], xy[0]] = 255
-            print(f'dv event {i} timestamp (usec): {timestamp:,}', end='\r')
+            print(f'dv {i} event timestamp (usec): {timestamp:,}', end='\r')
 
             cv2.imshow(f'find first event {i}', image)
             k = cv2.waitKey(0)
@@ -745,7 +749,7 @@ def projection():
         while True:
             timestamp = raw_frame_file[i].root[f'timestamp_{i}'][idx]
             image = raw_frame_file[i].root[f'image_undistorted_{i}'][idx]
-            print(f'dv frame {i} timestamp (usec): {timestamp:,}', end='\r')
+            print(f'dv {i} frame timestamp (usec): {timestamp:,}', end='\r')
 
             cv2.imshow(f'find first frame {i}', image)
             k = cv2.waitKey(0)
@@ -782,6 +786,7 @@ def projection():
             vicon_new = get_next_vicon(final_vicon_iter)
             vicon_midway = vicon['timestamp'] / 2 + vicon_new['timestamp'] / 2
         except StopIteration:
+            #print('DEBUG: out of vicon poses')
             break
 
         print()
@@ -876,6 +881,7 @@ def projection():
                     try:
                         frame[i] = get_next_frame(i, raw_frame_iter[i])
                     except StopIteration:
+                        #print(f'DEBUG: out of dv {i} frames')
                         done_frame[i] = True
                         break
 
@@ -943,6 +949,7 @@ def projection():
                     try:
                         event[i] = get_next_event(i, raw_event_iter[i])
                     except StopIteration:
+                        #print(f'DEBUG: out of dv {i} events')
                         done_event[i] = True
                         break
 
