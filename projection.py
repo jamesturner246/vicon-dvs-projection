@@ -108,7 +108,7 @@ def get_event(camera, record_time, address, port, mtx, dist, f_name):
 
     with dv.NetworkEventInput(address=address, port=port) as event_f:
         event = next(event_f)
-        stop_timestamp = event_timestamp + int(record_time * 1000000)
+        stop_timestamp = event.timestamp + int(record_time * 1000000)
 
         for event in event_f:
             if event.timestamp >= stop_timestamp:
@@ -698,75 +698,82 @@ def projection():
     #     30, dv_camera_shape[i][::-1]) for i in range(n_camera)]
 
 
-    # manually find first DV event
-    event = [None for i in range(n_camera)]
+    # manually find first DV event and frame
     event_start_timestamp = [None for i in range(n_camera)]
+    event = [None for i in range(n_camera)]
+    frame_start_timestamp = [None for i in range(n_camera)]
+    frame = [None for i in range(n_camera)]
     for i in range(n_camera):
-        n = 30
-        idx = 0
-        length = len(raw_event_file[i].root[f'timestamp_{i}'])
-        image = np.empty(dv_camera_shape[i], dtype='uint8')
+        search_image_shape = (dv_camera_shape[i][0], dv_camera_shape[i][1] * 2, 3)
+        search_image = np.empty(search_image_shape, dtype='uint8')
+        event_search_image = search_image[:, :dv_camera_shape[i][1]]
+        frame_search_image = search_image[:, dv_camera_shape[i][1]:]
+
+        batch = 30
+        i_event = 0
+        n_event = len(raw_event_file[i].root[f'timestamp_{i}'])
+        event_timestamp = raw_event_file[i].root[f'timestamp_{i}']
+        event_xy_undistorted = raw_event_file[i].root[f'xy_undistorted_{i}']
+
+        i_frame = 0
+        n_frame = len(raw_frame_file[i].root[f'timestamp_{i}'])
+        frame_timestamp = raw_frame_file[i].root[f'timestamp_{i}']
+        frame_image_undistorted = raw_frame_file[i].root[f'image_undistorted_{i}']
 
         while True:
-            timestamp = raw_event_file[i].root[f'timestamp_{i}'][idx*n]
-            xy = raw_event_file[i].root[f'xy_undistorted_{i}'][idx*n:(idx+1)*n]
-            xy_int = np.rint(xy).astype('int32')
-            image.fill(0)
-            for xy in xy_int:
-                xy_bounded = all(xy >= 0) and all(xy < dv_camera_shape[i][::-1])
+            # search events
+            event_search_image.fill(0)
+            for xy in event_xy_undistorted[i_event:(i_event + batch)]:
+                xy_int = np.rint(xy).astype('int32')
+                xy_bounded = all(xy_int >= 0) and all(xy_int < dv_camera_shape[i][::-1])
                 if xy_bounded:
-                    image[xy[1], xy[0]] = 255
-            print(f'dv {i} event timestamp (usec): {timestamp:,}', end='\r')
+                    event_search_image[xy_int[1], xy_int[0]] = 255
 
-            cv2.imshow(f'find first event {i}', image)
+            # search frames
+            if frame_timestamp[i_frame] < event_timestamp[i_event]:
+                while True:
+                    i_frame += 1
+                    if i_frame == n_frame:
+                        i_frame -= 1
+                        break
+                    if frame_timestamp[i_frame] > event_timestamp[i_event]:
+                        i_frame -= 1
+                        break
+            elif frame_timestamp[i_frame] > event_timestamp[i_event]:
+                while True:
+                    i_frame -= 1
+                    if i_frame < 0:
+                        i_frame = 0
+                        break
+                    if frame_timestamp[i_frame] <= event_timestamp[i_event]:
+                        break
+            frame_search_image[:] = frame_image_undistorted[i_frame]
+
+            print(f'dv {i} timestamps (usec):'
+                  f'  event: {event_timestamp[i_event]:,}:'
+                  f'  frame: {frame_timestamp[i_frame]:,}', end='\r')
+
+            cv2.imshow(f'find first dv {i} event and frame', search_image)
             k = cv2.waitKey(0)
             if k == ord(' '):
-                cv2.destroyWindow(f'find first event {i}')
+                cv2.destroyWindow(f'find first dv {i} event and frame')
                 break
             elif k == ord(','):
-                idx = max(idx - 1, 0)
+                i_event = max(i_event - batch, 0)
             elif k == ord('<'):
-                idx = max(idx - 50, 0)
+                i_event = max(i_event - (50 * batch), 0)
             elif k == ord('.'):
-                idx = min(idx + 1, length // n - 1)
+                i_event = min(i_event + batch, n_event - 1)
             elif k == ord('>'):
-                idx = min(idx + 50, length // n - 1)
+                i_event = min(i_event + (50 * batch), n_event - 1)
 
         print()
-        event_start_timestamp[i] = np.uint64(timestamp + 3000000) # plus 3 seconds
+
+        event_start_timestamp[i] = np.uint64(event_timestamp[i_event] + 3000000) # plus 3 seconds
+        frame_start_timestamp[i] = np.uint64(frame_timestamp[i_frame] + 3000000) # plus 3 seconds
         event[i] = get_next_event(i, raw_event_iter[i])
         while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
             event[i] = get_next_event(i, raw_event_iter[i])
-
-
-    # manually find first DV frame
-    frame = [None for i in range(n_camera)]
-    frame_start_timestamp = [None for i in range(n_camera)]
-    for i in range(n_camera):
-        idx = 0
-        length = len(raw_frame_file[i].root[f'timestamp_{i}'])
-
-        while True:
-            timestamp = raw_frame_file[i].root[f'timestamp_{i}'][idx]
-            image = raw_frame_file[i].root[f'image_undistorted_{i}'][idx]
-            print(f'dv {i} frame timestamp (usec): {timestamp:,}', end='\r')
-
-            cv2.imshow(f'find first frame {i}', image)
-            k = cv2.waitKey(0)
-            if k == ord(' '):
-                cv2.destroyWindow(f'find first frame {i}')
-                break
-            elif k == ord(','):
-                idx = max(idx - 1, 0)
-            elif k == ord('<'):
-                idx = max(idx - 50, 0)
-            elif k == ord('.'):
-                idx = min(idx + 1, length - 1)
-            elif k == ord('>'):
-                idx = min(idx + 50, length - 1)
-
-        print()
-        frame_start_timestamp[i] = np.uint64(timestamp + 3000000) # plus 3 seconds
         frame[i] = get_next_frame(i, raw_frame_iter[i])
         while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:
             frame[i] = get_next_frame(i, raw_frame_iter[i])
