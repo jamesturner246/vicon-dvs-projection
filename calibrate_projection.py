@@ -490,8 +490,6 @@ def rotation_matrix_to_tait_bryan_angles(M):
 
 
 def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_offset, nominal_focal_length, pixel_mm):
-    assert dv_p.shape[0] == vicon_p.shape[0]
-
     error = 0.0
     for v, d in zip(vicon_p, dv_p):
         output = vicon_to_dv(v, m, origin_offset, nominal_focal_length, pixel_mm)
