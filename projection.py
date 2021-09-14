@@ -303,7 +303,7 @@ def projection():
     test_number = 0
 
     date = time.strftime('%Y%m%d')
-    date = 20210910
+    #date = 20210910
     initials = 'jt'
 
     path_camera = './camera_calibration'
@@ -507,12 +507,12 @@ def projection():
     options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
     def err_fun_vicon_to_mesh(params, vicon_p, mesh_p, v_to_v0_translation, v_to_v0_rotation):
-        v0_p = np.dot(vicon_p - v_to_v0_translation, v_to_v0_rotation)
+        v0_p = np.dot(vicon_p + v_to_v0_translation, v_to_v0_rotation)
 
-        mesh_rotation = euler_angles_to_rotation_matrix(params[0:3])
-        mesh_translation = params[3:6]
+        v0_to_mesh_rotation = euler_angles_to_rotation_matrix(params[0:3])
+        v0_to_mesh_translation = params[3:6]
 
-        output = np.dot(v0_p - mesh_translation, mesh_rotation)
+        output = np.dot(v0_p + v0_to_mesh_translation, v0_to_mesh_rotation)
         difference = output - mesh_p
         error = np.sqrt(np.mean(difference ** 2))
 
@@ -521,9 +521,9 @@ def projection():
     for prop_name in props.keys():
         mesh_markers = np.empty((len(props[prop_name]), 3), dtype='float64')
         vicon_markers = np.empty(mesh_markers.shape, dtype='float64')
-        params = np.zeros(6, dtype='float64')
+        #params = np.zeros(6, dtype='float64')
         #params = np.random.rand(6) * 2 * np.pi - np.pi
-        params = np.array([2.13315854, 0.71653912, -0.49491337, 0.0, 0.0, 0.0])
+        params = np.array([-0.23134114, -2.83301699,  2.81133181, -1.54930157, -2.35502374,  2.1578688 ])
         print(params)
 
         for i_vicon in range(len(raw_vicon_file.root.timestamp)):
