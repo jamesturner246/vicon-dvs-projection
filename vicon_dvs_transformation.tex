@@ -54,59 +54,97 @@ Using this computed transformation, we use the numpy-stl library to project the 
 
 The tracker props we designed are available online \cite{???} in FreeCAD and STL mesh format. The code for the projection calibration procedure is available online at \cite{????}.
 
+\section{CAD coordinate to Vicon coordinate and pose}
+The entire chain of transforms from a vertex of the tool mesh in the
+CAD file coordinate system to a pixel on the screens of the two DVS
+cameras conceptually involves three rotation+translation transformations and a
+projection+dilation+translation in the camera:
+\begin{enumerate}
+\item An rotation+translation transformation $\vec{y}_1 = A_1 \vec{x} +\vec{b}_1$ of the
+  coordinates $\vec{x}$ in the CAD file to the coordinates $\vec{y}_1$
+  of the tool if it was located at the Vicon system's origin with the
+  Vicon system's $(0,0,0)$ (Tait-Bryan) angle pose. The particular Vicon origin and
+  $(0,0,0)$ pose are a product of the Vicon's own calibration.
+\item Another rotation+translation transformation at each time $t$ into
+  $\vec{y}_2(t) = A_2(t) \vec{y}_1 + \vec{b}_2(t)$, from the vicon origin
+  and $(0,0,0)$ pose to the current pose of the prop. The Tait-Bryan
+  angles for the rotation matrix $A_2(t)$ and the translation $\vec{b}_2(t)$
+  are provided by the vicon system as the tracked pose and position respectively.
+\item A third rotation+translation transformation $\vec{z}= A_3
+  \vec{y}_2 +\vec{b}_3$ into a camera-centric coordinate system with
+  the origin in the (idealised) pinhole of the camera, the x and y
+  axis in the orientation of the image plane and the z axis
+  perpendicular to the image plane and pointing
+  through the pinhole outwards.
+\item the last transformation is the camera projection
+  \begin{align}
+    \vec{z}' = P(\vec{z}) = 
+    \left(\begin{array}{c} z_1/z_3 \cdot k \\ z_2/z_3 \end{array}\right) \cdot f
+    + \left(\begin{array}{c} s_x / 2 \\ s_y / 2 \end{array}\right)
+  \end{align}
+  where the factor $f$ involves the focal length and pixel density on
+  the camera chip and $s_x$ and $s_y$ are the dimensions of the image in pixels. $k$ compensates for potential rescaling in the camera calibration method, see below.
+\end{enumerate}
+Additionally, we need to consider potential lens distortions of the
+DVS camera lenses as we will address below.
+
+In order to determine the first transformation, we take some
+recordings of LED marker positions $\vec{y}_2(t)$ with a prop of
+interest as provided by te vicon system and then
+use a general optimisation technique (Nelder-Mead simplex algorithm)
+to find the three Euler angles that determine $A_1$ and the three components of
+$\vec{b}_1$ so that the known positions of the LED markers $\vec{x}$ in the CAD
+coordinate system are mapped onto the the measured positions
+$\vec{y}_2$. In order to do so we calculate
+\begin{align}
+  & \vec{y}_2(t) = A_2(t) \vec{y}_1 + \vec{b}_2(t) \\
+  \Leftrightarrow \quad & A_2^T(t) (\vec{y}_2 - \vec{b}_2(t)) = \vec{y}_1 =
+  A_1 \vec{x} +\vec{b}
+\end{align}
+and hence minimise the cost function
+\begin{align}
+  C= \sum_{i,t} \left(A_2^T(t) (\vec{y}_2^{(i)}(t) - \vec{b}_2(t)) -
+  \vec{x}^{(i)}\right)^2
+\end{align}
+where $i$ enumerates the different LED markers of the prop and $t$ the
+time frames taken for this calibration step. $A_2(t)$ is obtained as
+the rotation matrix determined by the Vicon provided ``Tait-Bryan''
+pose and $\vec{b}_2$ as the Vicon provided prop location.
 
 \section{Vicon coordinate to DVS camera transform}
-Our approach has been to do two calibrations:
+Our approach for this step has been to do two calibrations:
 \begin{enumerate}
 \item Camera calibration: This is done with OpenCV and takes care of the lens distortions so that the corrected camera frames are according to a ``normal'' or rectilinear camera projection. The hope was that this would essentially be the equivalent of the the pinhole camera projection. Note that this transformation does involve slightly non-uniform rescaling of images, where the x-direction is slightly stretched compared to y (this will be an important detail below)
 \item Based on the assumption of a pinhole camera, the transformation from an arbitrary coordinate system in 3D (e.g. the reference frame of the global positioning system, hereafter referred to as the ``vicon system''). We will discuss below how these assumptions worked out.
 \end{enumerate}
 
 The camera calibration is described elsewhere (ref).
-For the camera projection, we started with the knowledge that the transformation is composed of an affine transformation and a simple pinhole projection, followed by transformation from mm to pixels. In this formulation we use that the affine transformation can subsume any linear transformations before and after the projection. However, to make things more interpretable, we do explicitly add the focal length in teh projection, transform mm to pixels and translate the image frame origin from teh centre of the picture to the upper left corner. These transformations are based on camera data and not fitted.
+For the camera projection, we started with the knowledge that the
+transformation is composed of a rotation+translation transformation and a simple pinhole projection, followed by transformation from mm to pixels and a move of the origin from the centre of teh image to the upper left corner. To make things interpretable, we explicitly use the focal length in the projection, transform mm to pixels and translate the image frame origin from the centre of the picture to the upper left corner. From these transformations, the mm to pixel and move of the origin are based on camera data and not fitted. The rotation, translation, focal length and potential relative scaling of x versus y due to the camera calibration procedure (8 parameters) are determined through the fitting procedure.
 The general form of the transformation is
 \begin{align}
-  \hat{\vec{y}} = \frac{1}{a} P(A\cdot \vec{x} + \vec{n}) + \frac{d}{2} \\
-  P(\vec{z})= \frac{1}{z_3}f \vec{z}  
+  \vec{z} &= \frac{1}{a} \left(\begin{array}{cc} k & 0 \\ 0 & 1 \end{array}\right) P(A_3\cdot \vec{y}_2 + \vec{b}_3) + \frac{d}{2} \\
+  P(\vec{y}) &= \frac{1}{y_3}f \vec{y}  
 \end{align}
-where $a= 18 \mu m/\text{pixel}$ is the spacing of pixels on the image chip, $P$ is the Projection with focal length $f$, $\vec{d}= (346, 260)$ is the image dimension in pixels, and $A$ and $\vec{n}$ denotes the (unknown) affine transformation from the vicon refrence frame into the camera reference frame. The latter has axes x to the right of the image, y downwards and z from the image plane through the pinhole outwards.
+where $a= 18 \mu m/\text{pixel}$ is the spacing of pixels on the image chip, $P$ is the Projection with focal length $f$, $\vec{d}= (346, 260)$ is the image dimension in pixels, and $A_3$ and $\vec{b}_3$ denote the (unknown) rotation+translation transformation from the vicon refrence frame into the camera reference frame. The latter has axes x to the right of the image, y downwards and z from the image plane through the pinhole outwards. $k$ is the rescaling of the x direction to counteract potential distortions from the amera calibration procedure.
 
-In order to determine the unknown parameters of $A$ and $\vec{n}$ we have taken a simple calibration approach: We place the vicon calibration wand that has 5 LEDs in different positions and orientations in the camera view area and acquire vicon coordinates of the LEDs and simultaneously detect the LEDs from the DVS events. There is a processing step where multiple DVS events are clustered with k-means clustering into 5 clusters to find the best estimate for the position $\vec{y}$ of the LEDs in the DVS image. Then, the main calibration step is to use a general optimization method to minimise the mean squared distance of $\vec{y}$ and the positions obtained by using equations (\ref{eqn1},\ref{eqn2}) on the simultaneaously acquired vicon coordinates $\vec{x}$. In practice we use the Nelder-Mead simplex algorithm as implemented in the scipy.optimize.minimize function.
-
-We have done this calibration with several data sets and it works reasonably well. I will here discuss one example of 20 wand positions. The optimization converges fairly quickly to a solution with RMS$= 11.846$ mm, corresponding to the match of points illustrated in figure \ref{figure1}.
-
-\begin{figure}
-  \includegraphics[width=\textwidth]{figure_match.png}
-  \caption{\label{figure1} Illustration of the match of measured DV points (crosses) and DV point calculated with the transformation matrix after optimisation (dots).}
-\end{figure}
-
-Subsequently, we have used the transformation to project the 3D meshes of tools from the positions and poses detected by the vicon sytem onto the DVS frames with good success.
-
-\subsection{Camera-centric position and pose}
-In order to create training data for regressors that predict position and pose of a tool based on DVS data, we need to record position and pose relative to the DVS camera reference frame. Otherwise, the training data, and hence the models, would depend on the (quite likely changing) camera position and orientation.
-
-We were hoping we could use our camera calibration procedure described above to also obtain the transformation from vicon position and pose to DVA-centric position and pose. The idea is that if the camera was essentially like a pinhole camera, then the affine transformation $(A,\vec{n})$ should consist of a rotation  and translation only, i.e. $A \in O(3)$, potentially even $SO(3)$ (depending whether there was an additional flip of an axis or not).
-In order to test the idea and design a system for determining camera-centric position and pose, we represented $A$ by Euler angles and repeated our fitting procedure for the set of Euler angles and the translation $\vec{n}$. The resulting fits are slightly less good than in the approach with the general affine transformation (figure \ref{figure2}). Notably, there are some deviations for wand positions very close to the camera. The summed residual error for all points in this example was RMA$= 26.4$ mm.
-
-\begin{figure}
-  \includegraphics[width=\textwidth]{figure_match_euler.png}
-  \caption{\label{figure2} Illustration of the match if fitting with rotation and translation for the affine transformation from vicon to camera centric reference frame. The match is slightly worse than in figure \ref{figure1} with a notable deviation for the very close wand position in cyan.} 
-\end{figure}
-
-As the Nelder-Mead algorithm is a simple hill-climbing algorithm, the quality of fits could have been due to being stuck in a local minima. We therefore tried several runs with different parameter combinations using the ``basinhopping'' algorithm. For both approaches, the stated values are the best minimum we were able to find.
-
-It is an interesting question what additional transformation is added to rotation and translation in the ``general affine method''. To analyse this we examined the fitted affine matrix by decomposing it into a rotation matrix and a residual matrix as close as possible to the identity matrix (analyze\_matrix.ipynb). This analysis revealed that the residual transformation that the ``full affine method'' did over the ``rotation+translation method'' was effectively rescaling $z$, whcih is equivalent to rescaling the focal length.
-
-We hence added a rescaling of the focal length to the fitting parameters in addition to the rescaling in $x$ and as a result the fit was essentially as good as with the full affine method.
-Figure \ref{figure3} illustrates the result which has error RMS$= 13.56$.
+In order to determine the unknown parameters of $A_3$, $\vec{b}_3$, $f$ and $k$, we have taken a simple calibration approach: We place the vicon calibration wand that has 5 LEDs in different positions and orientations in the camera view area and acquire vicon coordinates of the LEDs and simultaneously detect the LEDs from the DVS events. There is a processing step where multiple DVS events are clustered with k-means clustering into 5 clusters to find the best estimate for the position $\vec{z}$ of the LEDs in the DVS image. Then, the main calibration step is to use a general optimization method to minimise the mean squared distance of $\vec{z}$ and the positions obtained by using equations (\ref{eqn1},\ref{eqn2}) on the simultaneaously acquired vicon coordinates $\vec{y}_2$. In practice we use the Nelder-Mead simplex algorithm as implemented in the scipy.optimize.minimize function.
 
 \begin{figure}
   \includegraphics[width=\textwidth]{figure_match_euler.png}
   \caption{\label{figure3} Fitting results after the correction factor fo the focal length was introduced.}
 \end{figure}
 
-\subsection{Camera-centric pose estimation}
-With these results it appears reasonable to try to use the camera calibration method also in the context of pose estimation relative to camera coordinates. For this purpose one would use the rotation+translation method and then use the determined rotation and translation without the projection stage to transform vicon positions into camera-centric positions. To transform Euler angles for the tool pose, we need to simply combine the Euler angles defining the pose and the Euler angles of the vicon-to-camera rotation.
+Subsequently, we have used the transformation to project the 3D meshes of tools from the positions and poses detected by the vicon sytem onto the DVS frames with good success. Figure \ref{figure3} illustrates the quality of this calibration procedure for an example calibration data set. The residual error was RMS$= 13.56$.
+ As the Nelder-Mead algorithm is a simple hill-climbing algorithm, the quality of fits could be affected by being stuck in a local minimum. We therefore tried several runs with different parameter combinations using the ``basinhopping'' algorithm. We typically observed no further improvements.
 
+\subsection{Camera-centric position and pose}
+In order to create training data for regressors that predict position and pose of a tool based on DVS data, we need to record position and pose relative to the DVS camera reference frame. Otherwise, the training data, and hence the models, would depend on the (quite likely changing) camera position and orientation, as well as the Vicon calibration data at any particular time.
 
+In order to obtain the camera-centric data, we can get the position information simply by translating the CAD file origin using our full chain of transformations $\vec{z_0}= A_3(A_2(A_1 \vec{0}+ \vec{b}_1)+\vec{b}_2)+\vec{b}_3)= A_3(A_2(\vec{b}_1)+\vec{b}_2)+\vec{b}_3$. For the pose, we don't need to consider the translations and hence just determine the Euler angles of the combined rotation $A_3 \cdot A_2(t) \cdot A_1$.
+
+\section{Conventions}
+We are using proper Euler angles in the $z_\alpha \rightarrow x'_\beta \rightarrow z''_\gamma$ convention of rotating first around the $z$ axis by $\alpha$ (counter-clockwise is $\alpha > 0$ when looking towards the origin), then around the new $x'$ axis by $\beta$ and then around the new $z''$ axis by $\gamma$. The angles are constrained to $\alpha, \gamma \in [-\pi, \pi]$ and $\beta \in [0, \pi]$.
+
+The Vicon positioning software uses Tait-Bryan angles with convention $x_\alpha \rightarrow y'_\beta \rightarrow z''_\gamma$ and, like for us, counter-clockwise corresponds to angle $ > 0$ when looking towards the origin. The angles are contained as $\alpha, \gamma \in [-\pi, \pi]$ and $\beta \in [-\frac{\pi}{2}, \frac{\pi}{2}]$.
 \end{document}
