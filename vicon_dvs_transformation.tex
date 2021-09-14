@@ -144,7 +144,17 @@ In order to create training data for regressors that predict position and pose o
 In order to obtain the camera-centric data, we can get the position information simply by translating the CAD file origin using our full chain of transformations $\vec{z_0}= A_3(A_2(A_1 \vec{0}+ \vec{b}_1)+\vec{b}_2)+\vec{b}_3)= A_3(A_2(\vec{b}_1)+\vec{b}_2)+\vec{b}_3$. For the pose, we don't need to consider the translations and hence just determine the Euler angles of the combined rotation $A_3 \cdot A_2(t) \cdot A_1$.
 
 \section{Conventions}
-We are using proper Euler angles in the $z_\alpha \rightarrow x'_\beta \rightarrow z''_\gamma$ convention of rotating first around the $z$ axis by $\alpha$ (counter-clockwise is $\alpha > 0$ when looking towards the origin), then around the new $x'$ axis by $\beta$ and then around the new $z''$ axis by $\gamma$. The angles are constrained to $\alpha, \gamma \in [-\pi, \pi]$ and $\beta \in [0, \pi]$.
+We are using proper Euler angles in the $z_\alpha \rightarrow x'_\beta
+\rightarrow z''_\gamma$ convention of rotating first around the $z$
+axis by $\alpha$, then around the new $x'$ axis by $\beta$ and then
+around the new $z''$ axis by $\gamma$. The rotations are
+counter-clockwise for positive angles when looking from
+positive values on the rotation axis towards the origin, for all three
+rotations. The angles are constrained to $\alpha, \gamma \in [-\pi, \pi]$ and $\beta \in [0, \pi]$.
 
-The Vicon positioning software uses Tait-Bryan angles with convention $x_\alpha \rightarrow y'_\beta \rightarrow z''_\gamma$ and, like for us, counter-clockwise corresponds to angle $ > 0$ when looking towards the origin. The angles are contained as $\alpha, \gamma \in [-\pi, \pi]$ and $\beta \in [-\frac{\pi}{2}, \frac{\pi}{2}]$.
+The Vicon positioning software appears to use Tait-Bryan angles with
+convention $x_\alpha \rightarrow y'_\beta \rightarrow z''_\gamma$
+where, strangely, positive $\alpha$ and $\gamma$ correspond to
+clock-wise and positive $\beta$ to a counter-clockwise rotation when
+looking from positive values on the rotation axis towards the origin. The angles are contained as $\alpha, \gamma \in [-\pi, \pi]$ and $\beta \in [-\frac{\pi}{2}, \frac{\pi}{2}]$.
 \end{document}
