@@ -303,7 +303,7 @@ def projection():
     test_number = 0
 
     date = time.strftime('%Y%m%d')
-    #date = 20210910
+    #date = 20210914
     initials = 'jt'
 
     path_camera = './camera_calibration'
@@ -356,7 +356,7 @@ def projection():
         'shaft_base':  [ 5.0,  120.0,  0.0  ],
         'shaft_tip':   [-5.0,  164.0,  0.0  ],
     }
-    mesh['jt_screwdriver'] = stl.mesh.Mesh.from_file('./props/screwdriver.stl')
+    mesh['jt_screwdriver'] = stl.mesh.Mesh.from_file('./props/screwdriver.stl').vectors
 
     # # mallet mesh marker coordinates
     # props['jt_mallet'] = {
@@ -365,7 +365,7 @@ def projection():
     #     'head_1':      [-40.0,  0.0,  276.5 ],
     #     'head_2':      [ 40.0,  0.0,  276.5 ],
     # }
-    # mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl')
+    # mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl').vectors
 
 
 
@@ -554,7 +554,7 @@ def projection():
 
                 mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix(params[0:3]).T
                 mesh_to_v0_translation[prop_name] = -params[3:6]
-                mesh_v0[prop_name] = np.matmul(mesh[prop_name].vectors, mesh_to_v0_rotation[prop_name])
+                mesh_v0[prop_name] = np.matmul(mesh[prop_name], mesh_to_v0_rotation[prop_name])
                 mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
 
                 break
@@ -884,11 +884,13 @@ def projection():
                 prop_masks[i][prop_name].fill(0)
                 continue
 
-            # # transform to Vicon space
-            # regressor = MultiOutputRegressor(estimator=LinearRegression()).fit(mesh_p, vicon_p)
-            # vicon_space_coefficients = np.array([re.coef_ for re in regressor.estimators_]).T
-            # vicon_space_constants = np.array([[re.intercept_ for re in regressor.estimators_]])
-            # vicon_space_p = np.matmul(mesh[prop_name].vectors, vicon_space_coefficients) + vicon_space_constants
+            # TODO: remove old transform
+
+            # transform to Vicon space
+            regressor = MultiOutputRegressor(estimator=LinearRegression()).fit(mesh_p, vicon_p)
+            mesh_to_v_coefficients = np.array([re.coef_ for re in regressor.estimators_]).T
+            mesh_to_v_constants = np.array([[re.intercept_ for re in regressor.estimators_]])
+            #vicon_space_p = np.matmul(mesh[prop_name], mesh_to_v_coefficients) + mesh_to_v_constants
 
 
 
@@ -896,7 +898,7 @@ def projection():
 
             # transform to Vicon space
             v0_to_v_rotation = euler_angles_to_rotation_matrix(vicon['rotation'][prop_name])
-            v0_to_v_translation = vicon_p.mean(0)
+            v0_to_v_translation = np.mean(list(vicon['translation'][prop_name].values()), 0)
             vicon_space_p = np.matmul(mesh_v0[prop_name], v0_to_v_rotation) + v0_to_v_translation
 
 

@@ -453,35 +453,39 @@ positive angles are counter-clockwise if looking towards the origin
 """
 
 def tait_bryan_angles_to_rotation_matrix(m):
+
     M= np.array([
-        [ 1, 0, 0],
-        [ 0, np.cos(m[0]), np.sin(m[0])],
-        [ 0, -np.sin(m[0]), np.cos(m[0])]])
+        [  1,             0,             0             ],
+        [  0,             np.cos(m[0]), -np.sin(m[0])  ],
+        [  0,             np.sin(m[0]),  np.cos(m[0])  ]])
+
     M= np.dot(M, np.array([
-        [ np.cos(m[1]), 0, np.sin(m[1])],
-        [ 0, 1, 0 ],
-        [ -np.sin(m[1]), 0, np.cos(m[1])]]))
+        [  np.cos(m[1]),  0,             np.sin(m[1])  ],
+        [  0,             1,             0             ],
+        [ -np.sin(m[1]),  0,             np.cos(m[1])  ]]))
+
     M= np.dot(M, np.array([
-        [ np.cos(m[2]), np.sin(m[2]), 0],
-        [ -np.sin(m[2]), np.cos(m[2]), 0],
-        [ 0, 0, 1]]))
+        [  np.cos(m[2]), -np.sin(m[2]),  0             ],
+        [  np.sin(m[2]),  np.cos(m[2]),  0             ],
+        [  0,             0,             1             ]]))
+
     return M
         
 def rotation_matrix_to_tait_bryan_angles(M):
     tolerance= 1e-10
     m= np.empty(3)   
-    m[0]= np.arctan(M[1,2]/M[2,2])
+    m[0]= np.arctan(-M[1,2]/M[2,2])
     m[1]= np.arcsin(M[0,2])
-    m[2]= np.arctan(M[0,1]/M[0,0])
+    m[2]= np.arctan(-M[0,1]/M[0,0])
     # problem: Tait-Bryan angles alpha and gamma are [-pi, pi] not just [-pi/2, pi/2] as produced by arctan. Need to find out whether we have the right angle for alpha and gamma:
     # M[1,2] == sin(m[0])*cos(m[1]) can be used to check m[0] - it needs to produce the correct sign
-    if M[1,2]*np.sin(m[0])*np.cos(m[1]) < 0.0:
+    if -M[1,2]*np.sin(m[0])*np.cos(m[1]) < 0.0:
         if m[0] > 0.0:
             m[0]= m[0]-np.pi
         else:
             m[0]= m[0]+np.pi
     # M[0,1] == cos(m[1])*sin(m[2]) can be used to check m[2] - it needs to produce the correct sign
-    if M[0,1]*np.cos(m[1])*np.sin(m[2]) < 0.0:
+    if -M[0,1]*np.cos(m[1])*np.sin(m[2]) < 0.0:
         if m[2] > 0.0:
             m[2]= m[2]-np.pi
         else:
