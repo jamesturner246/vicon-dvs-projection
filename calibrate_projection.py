@@ -548,7 +548,7 @@ def calibrate():
     dv_camera_mtx = [np.load(file_name) for file_name in dv_camera_mtx_file_name]
     dv_camera_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
     dv_camera_dist = [np.load(file_name) for file_name in dv_camera_dist_file_name]
-    dv_camera_origin_offset = [dv_camera_shape[i] / 2 for i in range(2)]
+    dv_camera_origin_offset = [dv_camera_shape[i][::-1] / 2 for i in range(2)]
     dv_camera_nominal_focal_length = [4.0 for i in range(2)]
     dv_camera_pixel_mm = [1.8e-2 for i in range(2)]
 
