@@ -914,9 +914,9 @@ def projection():
             # TODO: use new transform
 
             # transform to Vicon space
-            v0_to_v_rotation = euler_angles_to_rotation_matrix(vicon['rotation'][prop_name])
+            v0_to_v_rotation = euler_angles_to_rotation_matrix(vicon['rotation'][prop_name]).T
             v0_to_v_translation = np.mean(list(vicon['translation'][prop_name].values()), 0)
-            vicon_space_p = np.matmul(mesh_v0[prop_name], v0_to_v_rotation.T) + v0_to_v_translation
+            vicon_space_p = np.matmul(mesh_v0[prop_name], v0_to_v_rotation) + v0_to_v_translation
 
 
 
