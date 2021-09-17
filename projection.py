@@ -333,7 +333,7 @@ def projection():
     dv_frame_port = [36002, 36003]
 
     dv_camera_shape = [np.array([260, 346]) for i in range(n_camera)]
-    dv_camera_origin_offset = [dv_camera_shape[i] / 2 for i in range(n_camera)]
+    dv_camera_origin_offset = [dv_camera_shape[i][::-1] / 2 for i in range(n_camera)]
     dv_camera_nominal_focal_length = [4.0 for i in range(n_camera)]
     dv_camera_pixel_mm = [1.8e-2 for i in range(n_camera)]
 
