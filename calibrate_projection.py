@@ -631,7 +631,8 @@ def calibrate():
         # the meaning of m is as follows:
         # 0-2 Euler angles of transform into camera oriented space
         # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
-        # 6 scale factor for stretch in x-direction due to camera calibration/undistortion
+        # 6 scaling factor to scale focal length to real focal length
+        # 7 scale factor for stretch in x-direction due to camera calibration/undistortion
 
         # Vicon to DV transformation
         m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]

@@ -302,8 +302,8 @@ def projection():
     test_scenario = 'no_human'
     test_number = 0
 
-    date = time.strftime('%Y%m%d')
-    #date = 20210914
+    #date = time.strftime('%Y%m%d')
+    date = 20210914
     initials = 'jt'
 
     path_camera = './camera_calibration'
@@ -506,58 +506,77 @@ def projection():
     method = 'nelder-mead'
     options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
-    def err_fun_vicon_to_mesh(params, vicon_p, mesh_p, v_to_v0_translation, v_to_v0_rotation):
-        v0_p = np.dot(vicon_p + v_to_v0_translation, v_to_v0_rotation)
+    def err_fun_vicon_to_mesh(params, vicon_ps, mesh_ps, v_to_v0_translations, v_to_v0_rotations):
+        error= 0
+        for vicon_p, mesh_p, v_to_v0_translation, v_to_v0_rotation in zip(vicon_ps, mesh_ps, v_to_v0_translations, v_to_v0_rotations):
+            v0_p = np.dot(vicon_p + v_to_v0_translation, v_to_v0_rotation)
 
-        v0_to_mesh_rotation = euler_angles_to_rotation_matrix(params[0:3])
-        v0_to_mesh_translation = params[3:6]
+            v0_to_mesh_rotation = euler_angles_to_rotation_matrix(params[0:3])
+            v0_to_mesh_translation = params[3:6]
 
-        output = np.dot(v0_p + v0_to_mesh_translation, v0_to_mesh_rotation)
-        difference = output - mesh_p
-        error = np.sqrt(np.mean(difference ** 2))
+            output = np.dot(v0_p + v0_to_mesh_translation, v0_to_mesh_rotation)
+            difference = output - mesh_p
+            error += np.sqrt(np.mean(difference ** 2))
 
         return error
 
     for prop_name in props.keys():
-        mesh_markers = np.empty((len(props[prop_name]), 3), dtype='float64')
-        vicon_markers = np.empty(mesh_markers.shape, dtype='float64')
+        mesh_markers = []
+        vicon_markers = []
         #params = np.zeros(6, dtype='float64')
         #params = np.random.rand(6) * 2 * np.pi - np.pi
         params = np.array([-0.23134114, -2.83301699,  2.81133181, -1.54930157, -2.35502374,  2.1578688 ])
         print(params)
-
-        for i_vicon in range(len(raw_vicon_file.root.timestamp)):
+        vicon_rotation= []
+        vicon_translation= []
+        v_to_v0_rotation= []
+        v_to_v0_translation= []
+        for i_vicon in range(0,1000,100):
             i_marker = 0
+            mesh_marker= np.empty((len(props[prop_name]), 3), dtype='float64')
+            vicon_marker= np.empty(mesh_marker.shape, dtype='float64')
             for marker_name in props[prop_name].keys():
-                mesh_markers[i_marker] = props[prop_name][marker_name]
-                vicon_markers[i_marker] = raw_vicon_file.root.props[prop_name].translation[marker_name][i_vicon]
+                mesh_marker[i_marker] = props[prop_name][marker_name]
+                vicon_marker[i_marker] = raw_vicon_file.root.props[prop_name].translation[marker_name][i_vicon]
                 i_marker += 1
-            vicon_rotation = raw_vicon_file.root.props[prop_name].rotation[i_vicon]
-            vicon_translation = vicon_markers.mean(0)
+            mesh_markers.append(mesh_marker)
+            vicon_markers.append(vicon_marker)
+            vicon_rotation.append(raw_vicon_file.root.props[prop_name].rotation[i_vicon])
+            vicon_translation.append(vicon_marker.mean(0))
 
-            if all(np.isfinite(vicon_translation)) and all(np.isfinite(vicon_rotation)):
-                v_to_v0_rotation = euler_angles_to_rotation_matrix(vicon_rotation).T
-                v_to_v0_translation = -vicon_translation
+            v_to_v0_rotation.append(euler_angles_to_rotation_matrix(vicon_rotation[-1]))
+            v_to_v0_translation.append(-vicon_translation[-1])
 
-                err = err_fun_vicon_to_mesh(
-                    params, vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation)
-                print(f'{prop_name} mesh to vicon transform: original guess has error: {err}')
+        for v_to_v0_rot, v_to_v0_trans, vicon_m in zip(v_to_v0_rotation,v_to_v0_translation,vicon_markers):
+            print(np.matmul(vicon_m+v_to_v0_trans,v_to_v0_rot))
+        xxx= input()
+        err = err_fun_vicon_to_mesh(
+            params, vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation)
+        print(f'{prop_name} mesh to vicon transform: original guess has error: {err}')
 
-                result = minimize(
-                    err_fun_vicon_to_mesh, params, method=method, options=options,
-                    args=(vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation))
-                params = result['x']
+        result = minimize(
+            err_fun_vicon_to_mesh, params, method=method, options=options,
+            args=(vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation))
+        params = result['x']
 
-                err = err_fun_vicon_to_mesh(
-                    params, vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation)
-                print(f'{prop_name} mesh to vicon transform: final result has error: {err}')
+        err = err_fun_vicon_to_mesh(
+            params, vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation)
+        print(f'{prop_name} mesh to vicon transform: final result has error: {err}')
 
-                mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix(params[0:3]).T
-                mesh_to_v0_translation[prop_name] = -params[3:6]
-                mesh_v0[prop_name] = np.matmul(mesh[prop_name], mesh_to_v0_rotation[prop_name])
-                mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
+        mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix(params[0:3]).T
+        mesh_to_v0_translation[prop_name] = -params[3:6]
+        mesh_v0[prop_name] = np.matmul(mesh[prop_name], mesh_to_v0_rotation[prop_name])
+        mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
+        mesh_p = np.array(list(props[prop_name].values()))
+        mesh_p_v0= np.matmul(mesh_p, mesh_to_v0_rotation[prop_name])
+        mesh_p_v0 += mesh_to_v0_translation[prop_name]
 
-                break
+        #reconstructed= np.matmul(vicon_markers+ v_to_v0_translation, v_to_v0_rotation)
+        #reconstructed= np.matmul(reconstructed-mesh_to_v0_translation[prop_name], mesh_to_v0_rotation[prop_name].T)
+        #print(params)
+        #print(mesh_markers-reconstructed)
+        #xxx= input()
+
 
 
 
@@ -887,26 +906,21 @@ def projection():
             # TODO: remove old transform
 
             # transform to Vicon space
-            regressor = MultiOutputRegressor(estimator=LinearRegression()).fit(mesh_p, vicon_p)
+            regressor = MultiOutputRegressor(estimator=LinearRegression()).fit(mesh_p_v0, vicon_p)
             mesh_to_v_coefficients = np.array([re.coef_ for re in regressor.estimators_]).T
             mesh_to_v_constants = np.array([[re.intercept_ for re in regressor.estimators_]])
-            #vicon_space_p = np.matmul(mesh[prop_name], mesh_to_v_coefficients) + mesh_to_v_constants
-
-
+            #vicon_space_p = np.matmul(mesh_v0[prop_name], mesh_to_v_coefficients) + mesh_to_v_constants
 
             # TODO: use new transform
 
             # transform to Vicon space
             v0_to_v_rotation = euler_angles_to_rotation_matrix(vicon['rotation'][prop_name])
             v0_to_v_translation = np.mean(list(vicon['translation'][prop_name].values()), 0)
-            vicon_space_p = np.matmul(mesh_v0[prop_name], v0_to_v_rotation) + v0_to_v_translation
+            vicon_space_p = np.matmul(mesh_v0[prop_name], v0_to_v_rotation.T) + v0_to_v_translation
 
 
 
-
-
-
-
+            
 
             # transform to DV camera space
             for i in range(n_camera):
@@ -916,7 +930,7 @@ def projection():
                 dv_space_p *= dv_camera_focal_length[i]
                 dv_space_p /= dv_camera_pixel_mm[i]
                 dv_space_p *= dv_camera_x_scale[i]
-                dv_space_p += dv_camera_origin_offset[i][::-1]
+                dv_space_p += dv_camera_origin_offset[i]
                 dv_space_p_int = np.rint(dv_space_p).astype('int32')
 
                 # compute prop mask
