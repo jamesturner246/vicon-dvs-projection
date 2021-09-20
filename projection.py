@@ -380,12 +380,12 @@ def projection():
     dv_camera_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(n_camera)]
     dv_camera_dist = [np.load(file_name) for file_name in dv_camera_dist_file_name]
 
-    dv_space_transform_file_name = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(n_camera)]
-    dv_space_transform = [np.load(file_name) for file_name in dv_space_transform_file_name]
-    v_to_dv_rotation = [euler_angles_to_rotation_matrix(dv_space_transform[i][0:3]) for i in range(n_camera)]
-    v_to_dv_translation = [dv_space_transform[i][3:6] for i in range(n_camera)]
-    dv_camera_focal_length = [dv_camera_nominal_focal_length[i] * dv_space_transform[i][6] for i in range(n_camera)]
-    dv_camera_x_scale = [dv_space_transform[i][7] for i in range(n_camera)]
+    v_to_dv_params_file_name = [f'{path_projection}/v_to_dv_{i}_params.npy' for i in range(n_camera)]
+    v_to_dv_params = [np.load(file_name) for file_name in v_to_dv_params_file_name]
+    v_to_dv_rotation = [euler_angles_to_rotation_matrix(v_to_dv_params[i][0:3]) for i in range(n_camera)]
+    v_to_dv_translation = [v_to_dv_params[i][3:6] for i in range(n_camera)]
+    v_to_dv_focal_length = [dv_camera_nominal_focal_length[i] * v_to_dv_params[i][6] for i in range(n_camera)]
+    v_to_dv_x_scale = [v_to_dv_params[i][7] for i in range(n_camera)]
 
 
     ##################################################################
@@ -924,9 +924,9 @@ def projection():
                 dv_space_p = np.matmul(vicon_space_p, v_to_dv_rotation[i]) + v_to_dv_translation[i] * 10
                 dv_space_p[:, :, :2] *= (1 / dv_space_p[:, :, 2, np.newaxis])
                 dv_space_p = dv_space_p[:, :, :2]
-                dv_space_p *= dv_camera_focal_length[i]
+                dv_space_p *= v_to_dv_focal_length[i]
                 dv_space_p /= dv_camera_pixel_mm[i]
-                dv_space_p *= dv_camera_x_scale[i]
+                dv_space_p *= v_to_dv_x_scale[i]
                 dv_space_p += dv_camera_origin_offset[i]
                 dv_space_p_int = np.rint(dv_space_p).astype('int32')
 

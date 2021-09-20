@@ -98,7 +98,7 @@ def identify_wand_markers(dv):
     return dv
 
 
-def collect_vicon_data(address, port, prop_name, marker_names, n_frame, t_frame, debug):
+def get_vicon_data(address, port, prop_name, marker_names, n_frame, t_frame, debug):
 
     from vicon_dssdk import ViconDataStream
 
@@ -149,31 +149,26 @@ def process_vicon_data(marker_translation, debug):
     return coordinates
 
 
-def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
-                          n_frame=100, t_frame=0.001,
-                          reuse=False, debug=False,
-                          path='./calibration'):
+def get_vicon_coordinates(path, i_epoch, address, port, prop_name, marker_names,
+                          n_frame, t_frame, reuse=False, debug=False):
 
     print('get Vicon coordinates')
 
     marker_translation_file = f'{path}/vicon_marker_translation_{i_epoch}.npy'
-    coordinates_file = f'{path}/vicon_coordinates_{i_epoch}.npy'
 
     if reuse:
         marker_translation = np.load(marker_translation_file)
 
         coordinates = process_vicon_data(
             marker_translation, debug)
-        np.save(coordinates_file, coordinates)
 
     else:
-        marker_translation = collect_vicon_data(
+        marker_translation = get_vicon_data(
             address, port, prop_name, marker_names, n_frame, t_frame, debug)
         np.save(marker_translation_file, marker_translation)
 
         coordinates = process_vicon_data(
             marker_translation, debug)
-        np.save(coordinates_file, coordinates)
 
     # print Vicon coordinates
     for i in range(len(marker_names)):
@@ -182,7 +177,7 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
     return coordinates
 
 
-def collect_dv_data(address, event_port, n_event, debug):
+def get_dv_data(address, event_port, n_event, debug):
     event_xy = np.empty((n_event, 2), dtype='int32')
 
     with dv.NetworkEventInput(address=address, port=event_port) as f:
@@ -291,32 +286,28 @@ def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dis
     return coordinates
 
 
-def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, marker_names,
-                       camera, camera_shape, camera_mtx, camera_dist, n_event=10000,
-                       path='./calibration', reuse=False, debug=False):
+def get_dv_coordinates(path, i_epoch, address, event_port, frame_port, prop_name, marker_names,
+                       n_event, camera, camera_shape, camera_mtx, camera_dist, reuse=False, debug=False):
 
     print(f'get DV {camera} coordinates')
 
     event_xy_file = f'{path}/dv_{camera}_event_xy_{i_epoch}.npy'
-    coordinates_file = f'{path}/dv_{camera}_coordinates_{i_epoch}.npy'
 
     if reuse:
         event_xy = np.load(event_xy_file)
 
         coordinates = process_dv_data(
             event_xy, len(marker_names), camera_shape, camera_mtx, camera_dist, debug)
-        np.save(coordinates_file, coordinates)
 
     else:
         done = False
         while not done:
-            event_xy = collect_dv_data(
+            event_xy = get_dv_data(
                 address, event_port, n_event, debug)
             np.save(event_xy_file, event_xy)
 
             coordinates = process_dv_data(
                 event_xy, len(marker_names), camera_shape, camera_mtx, camera_dist, debug)
-            np.save(coordinates_file, coordinates)
 
             # plot coordinates
             with dv.NetworkFrameInput(address=address, port=frame_port) as f:
@@ -496,12 +487,9 @@ def calibrate():
 
     path_camera = './camera_calibration'
     path_projection = './projection_calibration'
-    path = './calibration'
 
     # make calibration directories
     os.makedirs(path_projection, exist_ok=True)
-    if not reuse:
-        os.makedirs(path, exist_ok=True)
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -513,9 +501,9 @@ def calibrate():
     ]
     n_marker = len(marker_names)
 
-    dv_n_event = 10000
     vicon_n_frame = 100
     vicon_t_frame = 0.001
+    dv_n_event = 10000
 
     # servers
     vicon_address, vicon_port = '127.0.0.1', 801
@@ -544,15 +532,13 @@ def calibrate():
             input('relocate prop and press enter...')
 
         vicon_wand_coordinates[i_epoch, :, :] = get_vicon_coordinates(
-            i_epoch, vicon_address, vicon_port, prop_name, marker_names,
-            n_frame=vicon_n_frame, t_frame=vicon_t_frame,
-            reuse=reuse, debug=debug, path=path)
+            path_projection, i_epoch, vicon_address, vicon_port, prop_name, marker_names,
+            vicon_n_frame, vicon_t_frame, reuse=reuse, debug=debug)
 
         for i in range(2):
             dv_wand_coordinates[i][i_epoch, :, :] = get_dv_coordinates(
-                i_epoch, dv_address, dv_event_port[i], dv_frame_port[i], prop_name, marker_names,
-                i, dv_camera_shape[i], dv_camera_mtx[i], dv_camera_dist[i], n_event=dv_n_event,
-                path=path, reuse=reuse, debug=debug)
+                path_projection, i_epoch, dv_address, dv_event_port[i], dv_frame_port[i], prop_name, marker_names,
+                dv_n_event, i, dv_camera_shape[i], dv_camera_mtx[i], dv_camera_dist[i], reuse=reuse, debug=debug)
 
         if not reuse:
             while True:
@@ -577,7 +563,7 @@ def calibrate():
     # 7 scale factor for stretch in x-direction due to camera calibration/undistortion
 
     # Vicon to DV transformation
-    m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
+    m_file = [f'{path_projection}/v_to_dv_{i}_params.npy' for i in range(2)]
     m = [np.empty(8) for i in range(2)]
     for i in range(2):
         # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
