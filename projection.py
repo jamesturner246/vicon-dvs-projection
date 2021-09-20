@@ -19,6 +19,7 @@ import dv
 from calibrate_projection import euler_angles_to_rotation_matrix
 from calibrate_projection import rotation_matrix_to_euler_angles
 from calibrate_projection import tait_bryan_angles_to_rotation_matrix
+from calibrate_projection import rotation_matrix_to_tait_bryan_angles
 
 n_camera = 1
 
@@ -547,9 +548,6 @@ def projection():
             v_to_v0_rotation.append(euler_angles_to_rotation_matrix(vicon_rotation[-1]))
             v_to_v0_translation.append(-vicon_translation[-1])
 
-        for v_to_v0_rot, v_to_v0_trans, vicon_m in zip(v_to_v0_rotation,v_to_v0_translation,vicon_markers):
-            print(np.matmul(vicon_m+v_to_v0_trans,v_to_v0_rot))
-        xxx= input()
         err = err_fun_vicon_to_mesh(
             params, vicon_markers, mesh_markers, v_to_v0_translation, v_to_v0_rotation)
         print(f'{prop_name} mesh to vicon transform: original guess has error: {err}')
@@ -570,12 +568,6 @@ def projection():
         mesh_p = np.array(list(props[prop_name].values()))
         mesh_p_v0= np.matmul(mesh_p, mesh_to_v0_rotation[prop_name])
         mesh_p_v0 += mesh_to_v0_translation[prop_name]
-
-        #reconstructed= np.matmul(vicon_markers+ v_to_v0_translation, v_to_v0_rotation)
-        #reconstructed= np.matmul(reconstructed-mesh_to_v0_translation[prop_name], mesh_to_v0_rotation[prop_name].T)
-        #print(params)
-        #print(mesh_markers-reconstructed)
-        #xxx= input()
 
 
 
@@ -911,6 +903,8 @@ def projection():
             mesh_to_v_constants = np.array([[re.intercept_ for re in regressor.estimators_]])
             #vicon_space_p = np.matmul(mesh_v0[prop_name], mesh_to_v_coefficients) + mesh_to_v_constants
 
+
+
             # TODO: use new transform
 
             # transform to Vicon space
@@ -920,7 +914,10 @@ def projection():
 
 
 
-            
+
+
+
+
 
             # transform to DV camera space
             for i in range(n_camera):

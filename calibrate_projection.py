@@ -357,26 +357,9 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
     return coordinates
 
 
-def vicon_to_dv_method_1(v, m, origin_offset, nominal_focal_length, pixel_mm):
-    z = vicon_to_camera_centric_method_1(v, m)
-    z[:2] *= (1 / z[2])
-    z = z[:2]
-    z *= nominal_focal_length
-    z /= pixel_mm       # millimetres per pixel
-    z += origin_offset  # add the origin offset from image centre to top left corner explicitly
-    return z
-
-
-def vicon_to_camera_centric_method_1(v, m):
-    M = np.reshape(m[:9], (3, 3))
-    z = np.dot(v, M)    # apply the rotation to get into the camera orientation frame
-    z += m[9:12] * 10   # add the translation (using cm for a better scale of fitting)
-    return z
-
-
-def vicon_to_dv_method_2(v, m, origin_offset, nominal_focal_length, pixel_mm):
+def vicon_to_dv(v, m, origin_offset, nominal_focal_length, pixel_mm):
     focal_length = nominal_focal_length * m[6]
-    z = vicon_to_camera_centric_method_2(v, m)
+    z = vicon_to_camera_centric(v, m)
     z[:2] *= (1 / z[2])
     z = z[:2]
     z *= focal_length
@@ -386,7 +369,7 @@ def vicon_to_dv_method_2(v, m, origin_offset, nominal_focal_length, pixel_mm):
     return z
 
 
-def vicon_to_camera_centric_method_2(v, m):
+def vicon_to_camera_centric(v, m):
     M = euler_angles_to_rotation_matrix(m)
     z = np.dot(v, M)    # apply the rotation to get into the camera orientation frame
     z += m[3:6] * 10    # add the translation (using cm for a better scale of fitting)
@@ -507,8 +490,6 @@ def calibrate():
 
     n_epoch = 20
 
-    calibrate_projection_method = 2
-
     reuse = True
     debug = False
     test = True
@@ -589,93 +570,49 @@ def calibrate():
 
     #########################################################################
 
-    if calibrate_projection_method == 1:
-        vicon_to_dv = vicon_to_dv_method_1
+    # the meaning of m is as follows:
+    # 0-2 Euler angles of transform into camera oriented space
+    # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
+    # 6 scaling factor to scale focal length to real focal length
+    # 7 scale factor for stretch in x-direction due to camera calibration/undistortion
 
-        # Vicon to DV transformation
-        m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
-        m = [np.load('./bootstrap_calibration/bootstrap_dv_space_transform.npy') for i in range(2)]
-        x = np.vstack(vicon_wand_coordinates)
-        y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
+    # Vicon to DV transformation
+    m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
+    m = [np.empty(8) for i in range(2)]
+    for i in range(2):
+        # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
+        m[i][:3] = [3.14, 1.6, 0.0]
+        # initial guess for translation from pinhole to vicon origin (in cm)
+        m[i][3:6] = [22.0, 93.0, 231.0]
+        # initial guess for the deviation of focal length and x-stretching from camera undistortion
+        m[i][6:8] = [1.0, 1.0]
+    x = np.vstack(vicon_wand_coordinates)
+    y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
 
-        method = 'nelder-mead'
-        options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
+    method = 'nelder-mead'
+    options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
-        for i in range(2):
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: original guess has error: {err}')
+    for i in range(2):
+        err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
+                      dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
+        print(f'camera {i} transform: original guess has error: {err}')
 
-            result = minimize(err_fun, m[i], method=method, options=options,
-                              args=(x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                                    dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i]))
-            m[i] = result['x']
+        result = minimize(err_fun, m[i], method=method, options=options,
+                          args=(x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
+                                dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i]))
+        m[i] = result['x']
 
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: final result has error: {err}')
+        err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
+                      dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
+        print(f'camera {i} transform: final result has error: {err}')
 
-            np.save(m_file[i], m[i])
+        np.save(m_file[i], m[i])
 
-            print('DV space coefficients')
-            print(np.reshape(m[i][:9], (3, 3)))
-            print('DV space constants')
-            print(m[i][9:12])
-            print()
-
-    #########################################################################
-
-    elif calibrate_projection_method == 2:
-        vicon_to_dv = vicon_to_dv_method_2
-
-        # the meaning of m is as follows:
-        # 0-2 Euler angles of transform into camera oriented space
-        # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
-        # 6 scaling factor to scale focal length to real focal length
-        # 7 scale factor for stretch in x-direction due to camera calibration/undistortion
-
-        # Vicon to DV transformation
-        m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
-        m = [np.empty(8) for i in range(2)]
-        for i in range(2):
-            # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
-            m[i][:3] = [3.14, 1.6, 0.0]
-            # initial guess for translation from pinhole to vicon origin (in cm)
-            m[i][3:6] = [22.0, 93.0, 231.0]
-            # initial guess for the deviation of focal length and x-stretching from camera undistortion
-            m[i][6:8] = [1.0, 1.0]
-        x = np.vstack(vicon_wand_coordinates)
-        y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
-
-        method = 'nelder-mead'
-        options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
-
-        for i in range(2):
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: original guess has error: {err}')
-
-            result = minimize(err_fun, m[i], method=method, options=options,
-                              args=(x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                                    dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i]))
-            m[i] = result['x']
-
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: final result has error: {err}')
-
-            np.save(m_file[i], m[i])
-
-            print("Euler angles: {}".format(m[i][:3]))
-            print("Translation: {}".format(m[i][3:6]))
-            print("focal length and x rescales: {}".format(m[i][6:]))
-            print("The matrix: {}".format(euler_angles_to_rotation_matrix(m[i])))
-            print()
-
-    #########################################################################
-
-    else:
-        raise RuntimeError('invalid projection calibration method')
+        print("Euler angles: {}".format(m[i][:3]))
+        print("Translation: {}".format(m[i][3:6]))
+        print("focal length and x rescales: {}".format(m[i][6:]))
+        print("The matrix: {}".format(euler_angles_to_rotation_matrix(m[i])))
+        print()
 
     #########################################################################
 
