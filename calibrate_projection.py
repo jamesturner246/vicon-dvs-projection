@@ -361,7 +361,7 @@ def vicon_to_dv(v, m, origin_offset, nominal_focal_length, pixel_mm):
 
 
 def vicon_to_camera_centric(v, m):
-    M = euler_angles_to_rotation_matrix(m)
+    M = euler_angles_to_rotation_matrix(m[0:3])
     z = np.dot(v, M)    # apply the rotation to get into the camera orientation frame
     z += m[3:6] * 10    # add the translation (using cm for a better scale of fitting)
     return z
@@ -594,10 +594,11 @@ def calibrate():
 
         np.save(m_file[i], m[i])
 
-        print("Euler angles: {}".format(m[i][:3]))
+        print("Euler angles: {}".format(m[i][0:3]))
+        print("Rotation matrix: {}".format(euler_angles_to_rotation_matrix(m[i][0:3])))
         print("Translation: {}".format(m[i][3:6]))
-        print("focal length and x rescales: {}".format(m[i][6:]))
-        print("The matrix: {}".format(euler_angles_to_rotation_matrix(m[i])))
+        print("focal length rescale: {}".format(m[i][6]))
+        print("x rescale: {}".format(m[i][7]))
         print()
 
     #########################################################################
