@@ -730,10 +730,13 @@ def calibrate():
                       dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
         print(f'camera {i} transform: final result has error: {err}')
 
+        # convert translation to millimetres
+        m[i][3:6] *= 10
+
+        # save transform
         np.save(m_file[i], m[i])
 
         print("Euler angles: {}".format(m[i][0:3]))
-        print("Rotation matrix: {}".format(euler_angles_to_rotation_matrix_transposed(m[i][0:3])))
         print("Translation: {}".format(m[i][3:6]))
         print("focal length rescale: {}".format(m[i][6]))
         print("x rescale: {}".format(m[i][7]))
