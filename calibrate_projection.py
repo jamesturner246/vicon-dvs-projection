@@ -377,28 +377,69 @@ def vicon_to_camera_centric(v, m):
 
 
 
+
+
+
+"""
+Vicon Euler angles appear to be Tait-Bryan angles:
+m[0] - rotation around x axis in [-pi, pi]
+m[1] - rotation around (new) y axis [-pi/2, pi/2]
+m[2] - rotation around (new) z axis [-pi, pi]
+positive angles are counter-clockwise if looking towards the origin
+"""
+
+def tait_bryan_angles_to_rotation_matrix(m):
+
+    M= np.array([
+        [  1,             0,             0             ],
+        [  0,             np.cos(m[0]),  np.sin(m[0])  ],
+        [  0,            -np.sin(m[0]),  np.cos(m[0])  ],
+    ])
+
+    M= np.dot(np.array([
+        [  np.cos(m[1]),  0,            -np.sin(m[1])  ],
+        [  0,             1,             0             ],
+        [  np.sin(m[1]),  0,             np.cos(m[1])  ],
+    ]), M)
+
+    M= np.dot(np.array([
+        [  np.cos(m[2]),  np.sin(m[2]),  0             ],
+        [ -np.sin(m[2]),  np.cos(m[2]),  0             ],
+        [  0,             0,             1             ],
+    ]), M)
+
+    return M
+
+
 """
 For Euler angles we use the z1 -> x′ -> z2″ convention corresponding to the product
 Z(m[0])*X(m[1])*Z(m[2])
 """
 
 def euler_angles_to_rotation_matrix(m):
+
     M = np.array([
         [  np.cos(m[0]), -np.sin(m[0]),  0            ],
         [  np.sin(m[0]),  np.cos(m[0]),  0            ],
         [  0,             0,             1            ],
     ])
+
     M = np.dot(np.array([
         [  1,             0,             0            ],
         [  0,             np.cos(m[1]), -np.sin(m[1]) ],
         [  0,             np.sin(m[1]),  np.cos(m[1]) ],
     ]), M)
+
     M = np.dot(np.array([
         [  np.cos(m[2]), -np.sin(m[2]),  0            ],
         [  np.sin(m[2]),  np.cos(m[2]),  0            ],
         [  0,             0,             1            ],
     ]), M)
+
     return M
+
+
+
 
 
 
@@ -445,6 +486,9 @@ def rotation_matrix_to_euler_angles(M):
 
 
 
+
+
+
 """
 We use a convention where vectors as row vectors and matrices are multipied from the right.
 As for Euler angles we use the z1 -> x′ -> z2″ convention corresponding to the product
@@ -452,18 +496,25 @@ Z(m[0])*X(m[1])*Z(m[2])
 """  
 
 def euler_angles_to_rotation_matrix_transposed(m):
+
     M = np.array([
-        [ np.cos(m[0]), np.sin(m[0]), 0],
-        [-np.sin(m[0]), np.cos(m[0]), 0],
-        [ 0,            0,            1]])
+        [  np.cos(m[0]),  np.sin(m[0]),  0            ],
+        [ -np.sin(m[0]),  np.cos(m[0]),  0            ],
+        [  0,             0,             1            ],
+    ])
+
     M = np.dot(M, np.array([
-        [1,             0,            0],
-        [0,  np.cos(m[1]), np.sin(m[1])],
-        [0, -np.sin(m[1]), np.cos(m[1])]]))
+        [  1,             0,             0            ],
+        [  0,             np.cos(m[1]),  np.sin(m[1]) ],
+        [  0,            -np.sin(m[1]),  np.cos(m[1]) ],
+    ]))
+
     M = np.dot(M, np.array([
-        [ np.cos(m[2]), np.sin(m[2]), 0],
-        [-np.sin(m[2]), np.cos(m[2]), 0],
-        [ 0,            0,            1]]))
+        [  np.cos(m[2]),  np.sin(m[2]),  0            ],
+        [ -np.sin(m[2]),  np.cos(m[2]),  0            ],
+        [  0,             0,             1            ],
+    ]))
+
     return M
 
 
@@ -509,17 +560,20 @@ def tait_bryan_angles_to_rotation_matrix_transposed(m):
     M= np.array([
         [  1,             0,             0             ],
         [  0,             np.cos(m[0]), -np.sin(m[0])  ],
-        [  0,             np.sin(m[0]),  np.cos(m[0])  ]])
+        [  0,             np.sin(m[0]),  np.cos(m[0])  ],
+    ])
 
     M= np.dot(M, np.array([
         [  np.cos(m[1]),  0,             np.sin(m[1])  ],
         [  0,             1,             0             ],
-        [ -np.sin(m[1]),  0,             np.cos(m[1])  ]]))
+        [ -np.sin(m[1]),  0,             np.cos(m[1])  ],
+    ]))
 
     M= np.dot(M, np.array([
         [  np.cos(m[2]), -np.sin(m[2]),  0             ],
         [  np.sin(m[2]),  np.cos(m[2]),  0             ],
-        [  0,             0,             1             ]]))
+        [  0,             0,             1             ],
+    ]))
 
     return M
         
