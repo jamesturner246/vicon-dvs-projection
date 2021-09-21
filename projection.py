@@ -77,10 +77,12 @@ def create_vicon_file(f_name, props):
         f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     data['extrapolated'] = {}
     data['rotation'] = {}
+    data['translation'] = {}
     data['rotation_matrix'] = {}
     data['markers'] = {}
     for i in range(n_dv_cam):
         data[f'camera_{i}_rotation'] = {}
+        data[f'camera_{i}_translation'] = {}
         data[f'camera_{i}_rotation_matrix'] = {}
         data[f'camera_{i}_markers'] = {}
 
@@ -91,6 +93,8 @@ def create_vicon_file(f_name, props):
             g_prop, 'extrapolated', tables.atom.BoolAtom(), (0,))
         data['rotation'][prop_name] = f.create_earray(
             g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
+        data['translation'][prop_name] = f.create_earray(
+            g_prop, 'translation', tables.atom.Float64Atom(), (0, 3))
         data['rotation_matrix'][prop_name] = f.create_earray(
             g_prop, 'rotation_matrix', tables.atom.Float64Atom(), (0, 3, 3))
         data['markers'][prop_name] = {}
@@ -101,6 +105,8 @@ def create_vicon_file(f_name, props):
         for i in range(n_dv_cam):
             data[f'camera_{i}_rotation'][prop_name] = f.create_earray(
                 g_prop, f'camera_{i}_rotation', tables.atom.Float64Atom(), (0, 3))
+            data[f'camera_{i}_translation'][prop_name] = f.create_earray(
+                g_prop, f'camera_{i}_translation', tables.atom.Float64Atom(), (0, 3))
             data[f'camera_{i}_rotation_matrix'][prop_name] = f.create_earray(
                 g_prop, f'camera_{i}_rotation_matrix', tables.atom.Float64Atom(), (0, 3, 3))
             data[f'camera_{i}_markers'][prop_name] = {}
@@ -224,6 +230,9 @@ def get_vicon(record_time, address, port, props, f_name):
                 rotation = rotation_matrix_to_euler_angles(rotation)
                 data['rotation'][prop_name].append([rotation])
 
+                translation = client.GetSegmentGlobalTranslation(prop_name, root_segment)[0]
+                data['translation'][prop_name].append([translation])
+
                 rotation_matrix = client.GetSegmentGlobalRotationMatrix(prop_name, root_segment)[0]
                 data['rotation_matrix'][prop_name].append([rotation_matrix])
 
@@ -234,6 +243,9 @@ def get_vicon(record_time, address, port, props, f_name):
             else:
                 rotation = np.full(3, np.nan, dtype='float64')
                 data['rotation'][prop_name].append([rotation])
+
+                translation = np.full(3, np.nan, dtype='float64')
+                data['translation'][prop_name].append([translation])
 
                 rotation_matrix = np.full((3, 3), np.nan, dtype='float64')
                 data['rotation_matrix'][prop_name].append([rotation_matrix])
@@ -286,6 +298,12 @@ def get_next_vicon(vicon_iter):
             vicon['rotation'][prop_name] = next(
                 vicon_iter['rotation'][prop_name])
 
+    if 'translation' in vicon_iter:
+        vicon['translation'] = {}
+        for prop_name in vicon_iter['translation'].keys():
+            vicon['translation'][prop_name] = next(
+                vicon_iter['translation'][prop_name])
+
     if 'rotation_matrix' in vicon_iter:
         vicon['rotation_matrix'] = {}
         for prop_name in vicon_iter['rotation_matrix'].keys():
@@ -298,6 +316,13 @@ def get_next_vicon(vicon_iter):
             for prop_name in vicon_iter[f'camera_{i}_rotation'].keys():
                 vicon[f'camera_{i}_rotation'][prop_name] = next(
                     vicon_iter[f'camera_{i}_rotation'][prop_name])
+
+    for i in range(n_dv_cam):
+        if f'camera_{i}_translation' in vicon_iter:
+            vicon[f'camera_{i}_translation'] = {}
+            for prop_name in vicon_iter[f'camera_{i}_translation'].keys():
+                vicon[f'camera_{i}_translation'][prop_name] = next(
+                    vicon_iter[f'camera_{i}_translation'][prop_name])
 
     for i in range(n_dv_cam):
         if f'camera_{i}_rotation_matrix' in vicon_iter:
@@ -492,10 +517,16 @@ def projection():
     timestamp = raw_vicon_file.root.timestamp
     raw_vicon_iter['timestamp'] = timestamp.iterrows()
     raw_vicon_iter['rotation'] = {}
+    #raw_vicon_iter['translation'] = {}
+    #raw_vicon_iter['rotation_matrix'] = {}
     raw_vicon_iter['markers'] = {}
     for prop_name in props.keys():
         rotation = raw_vicon_file.root.props[prop_name].rotation
         raw_vicon_iter['rotation'][prop_name] = rotation.iterrows()
+        #translation = raw_vicon_file.root.props[prop_name].translation
+        #raw_vicon_iter['translation'][prop_name] = translation.iterrows()
+        #rotation_matrix = raw_vicon_file.root.props[prop_name].rotation_matrix
+        #raw_vicon_iter['rotation_matrix'][prop_name] = rotation_matrix.iterrows()
         raw_vicon_iter['markers'][prop_name] = {}
         for marker_name in props[prop_name].keys():
             marker = raw_vicon_file.root.props[prop_name].markers[marker_name]
@@ -507,10 +538,14 @@ def projection():
     # initialise good Vicon frame buffer
     vicon_timestamp_buffer = {}
     vicon_rotation_buffer = {}
+    #vicon_translation_buffer = {}
+    #vicon_rotation_matrix_buffer = {}
     vicon_markers_buffer = {}
     for prop_name in props.keys():
         vicon_timestamp_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
+        #vicon_translation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
+        #vicon_rotation_matrix_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_markers_buffer[prop_name] = {}
         for marker_name in props[prop_name].keys():
             vicon_markers_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
@@ -523,6 +558,10 @@ def projection():
         vicon_timestamp_buffer[prop_name].append(timestamp)
         rotation = vicon['rotation'][prop_name]
         vicon_rotation_buffer[prop_name].append(rotation)
+        #translation = vicon['translation'][prop_name]
+        #vicon_translation_buffer[prop_name].append(translation)
+        #rotation_matrix = vicon['rotation_matrix'][prop_name]
+        #vicon_rotation_matrix_buffer[prop_name].append(rotation_matrix)
         for marker_name in props[prop_name].keys():
             marker = vicon['markers'][prop_name][marker_name]
             vicon_markers_buffer[prop_name][marker_name].append(marker)
@@ -577,6 +616,7 @@ def projection():
             vicon_markers.append(vicon_marker)
 
             rotation = raw_vicon_file.root.props[prop_name].rotation[i_vicon]
+            #translation = raw_vicon_file.root.props[prop_name].translation[i_vicon]
             translation = vicon_marker.mean(0) # TODO: use root segment
 
             v0_to_v_rotations.append(euler_angles_to_rotation_matrix(rotation).T)
@@ -928,6 +968,7 @@ def projection():
 
             # transform to Vicon space
             v0_to_v_rotation = euler_angles_to_rotation_matrix(vicon['rotation'][prop_name]).T
+            #v0_to_v_translation = vicon['translation'][prop_name]
             v0_to_v_translation = np.mean(list(vicon['markers'][prop_name].values()), 0) # TODO: use root segment
             vicon_space_p = np.matmul(mesh_v0[prop_name], v0_to_v_rotation) + v0_to_v_translation
 
