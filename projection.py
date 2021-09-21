@@ -77,9 +77,11 @@ def create_vicon_file(f_name, props):
         f.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
     data['extrapolated'] = {}
     data['rotation'] = {}
+    data['rotation_matrix'] = {}
     data['markers'] = {}
     for i in range(n_dv_cam):
         data[f'camera_{i}_rotation'] = {}
+        data[f'camera_{i}_rotation_matrix'] = {}
         data[f'camera_{i}_markers'] = {}
 
     g_props = f.create_group(f.root, 'props')
@@ -89,6 +91,8 @@ def create_vicon_file(f_name, props):
             g_prop, 'extrapolated', tables.atom.BoolAtom(), (0,))
         data['rotation'][prop_name] = f.create_earray(
             g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3))
+        data['rotation_matrix'][prop_name] = f.create_earray(
+            g_prop, 'rotation_matrix', tables.atom.Float64Atom(), (0, 3, 3))
         data['markers'][prop_name] = {}
         g_markers = f.create_group(g_prop, 'markers')
         for marker_name in props[prop_name].keys():
@@ -97,6 +101,8 @@ def create_vicon_file(f_name, props):
         for i in range(n_dv_cam):
             data[f'camera_{i}_rotation'][prop_name] = f.create_earray(
                 g_prop, f'camera_{i}_rotation', tables.atom.Float64Atom(), (0, 3))
+            data[f'camera_{i}_rotation_matrix'][prop_name] = f.create_earray(
+                g_prop, f'camera_{i}_rotation_matrix', tables.atom.Float64Atom(), (0, 3, 3))
             data[f'camera_{i}_markers'][prop_name] = {}
             g_camera_markers = f.create_group(g_prop, f'camera_{i}_markers')
             for marker_name in props[prop_name].keys():
@@ -218,16 +224,22 @@ def get_vicon(record_time, address, port, props, f_name):
                 rotation = rotation_matrix_to_euler_angles(rotation)
                 data['rotation'][prop_name].append([rotation])
 
+                rotation_matrix = client.GetSegmentGlobalRotationMatrix(prop_name, root_segment)[0]
+                data['rotation_matrix'][prop_name].append([rotation_matrix])
+
                 for marker_name in marker_names:
                     marker = client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
                     data['markers'][prop_name][marker_name].append([marker])
 
             else:
-                rotation = np.full(3, np.nan)
+                rotation = np.full(3, np.nan, dtype='float64')
                 data['rotation'][prop_name].append([rotation])
 
+                rotation_matrix = np.full((3, 3), np.nan, dtype='float64')
+                data['rotation_matrix'][prop_name].append([rotation_matrix])
+
                 for marker_name in marker_names:
-                    marker = np.full(3, np.nan)
+                    marker = np.full(3, np.nan, dtype='float64')
                     data['markers'][prop_name][marker_name].append([marker])
 
     client.Disconnect()
@@ -259,23 +271,40 @@ def get_next_vicon(vicon_iter):
     vicon = {}
 
     if 'timestamp' in vicon_iter:
-        vicon['timestamp'] = next(vicon_iter['timestamp'])
+        vicon['timestamp'] = next(
+            vicon_iter['timestamp'])
 
     if 'extrapolated' in vicon_iter:
         vicon['extrapolated'] = {}
         for prop_name in vicon_iter['extrapolated'].keys():
-            vicon['extrapolated'][prop_name] = next(vicon_iter['extrapolated'][prop_name])
+            vicon['extrapolated'][prop_name] = next(
+                vicon_iter['extrapolated'][prop_name])
 
     if 'rotation' in vicon_iter:
         vicon['rotation'] = {}
         for prop_name in vicon_iter['rotation'].keys():
-            vicon['rotation'][prop_name] = next(vicon_iter['rotation'][prop_name])
+            vicon['rotation'][prop_name] = next(
+                vicon_iter['rotation'][prop_name])
+
+    if 'rotation_matrix' in vicon_iter:
+        vicon['rotation_matrix'] = {}
+        for prop_name in vicon_iter['rotation_matrix'].keys():
+            vicon['rotation_matrix'][prop_name] = next(
+                vicon_iter['rotation_matrix'][prop_name])
 
     for i in range(n_dv_cam):
         if f'camera_{i}_rotation' in vicon_iter:
             vicon[f'camera_{i}_rotation'] = {}
             for prop_name in vicon_iter[f'camera_{i}_rotation'].keys():
-                vicon[f'camera_{i}_rotation'][prop_name] = next(vicon_iter[f'camera_{i}_rotation'][prop_name])
+                vicon[f'camera_{i}_rotation'][prop_name] = next(
+                    vicon_iter[f'camera_{i}_rotation'][prop_name])
+
+    for i in range(n_dv_cam):
+        if f'camera_{i}_rotation_matrix' in vicon_iter:
+            vicon[f'camera_{i}_rotation_matrix'] = {}
+            for prop_name in vicon_iter[f'camera_{i}_rotation_matrix'].keys():
+                vicon[f'camera_{i}_rotation_matrix'][prop_name] = next(
+                    vicon_iter[f'camera_{i}_rotation_matrix'][prop_name])
 
     if 'markers' in vicon_iter:
         vicon['markers'] = {}
