@@ -19,7 +19,6 @@ import dv
 from calibrate_projection import euler_angles_to_rotation_matrix
 from calibrate_projection import rotation_matrix_to_euler_angles
 from calibrate_projection import tait_bryan_angles_to_rotation_matrix
-from calibrate_projection import rotation_matrix_to_tait_bryan_angles
 
 n_dv_cam = 1
 
@@ -227,6 +226,7 @@ def get_vicon(record_time, address, port, props, f_name):
 
                 rotation = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
                 rotation = tait_bryan_angles_to_rotation_matrix(rotation)
+                # TODO: compare 'rotation' here to vicon rotation_matrix below
                 rotation = rotation_matrix_to_euler_angles(rotation)
                 data['rotation'][prop_name].append([rotation])
 
@@ -580,7 +580,8 @@ def projection():
     def err_fun_mesh_to_v0(params, mesh_ps, vicon_ps, v0_to_v_rotations, v0_to_v_translations):
         error= 0
 
-        for mesh_p, vicon_p, v0_to_v_translation, v0_to_v_rotation in zip(mesh_ps, vicon_ps, v0_to_v_translations, v0_to_v_rotations):
+        for mesh_p, vicon_p, v0_to_v_translation, v0_to_v_rotation in zip(
+                mesh_ps, vicon_ps, v0_to_v_translations, v0_to_v_rotations):
 
             mesh_to_v0_rotation = euler_angles_to_rotation_matrix(params[0:3])
             mesh_to_v0_translation = params[3:6]
