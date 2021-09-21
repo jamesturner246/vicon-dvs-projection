@@ -630,10 +630,16 @@ def projection():
             final_vicon_data['extrapolated'][prop_name].append([False])
             rotation = vicon['rotation'][prop_name]
             final_vicon_data['rotation'][prop_name].append([rotation])
+            translation = vicon['translation'][prop_name]
+            final_vicon_data['translation'][prop_name].append([translation])
             for i in range(n_dv_cam):
                 cam_rotation = rotation_matrix_to_euler_angles_transposed(
                     np.dot(rotation, v_to_dv_rotation[i]))
                 final_vicon_data[f'camera_{i}_rotation'][prop_name].append([cam_rotation])
+            # TODO: figure this out
+            #for i in range(n_dv_cam):
+            #    cam_translation =
+            #    final_vicon_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
             for marker_name in props[prop_name].keys():
                 marker = vicon['markers'][prop_name][marker_name]
                 final_vicon_data['markers'][prop_name][marker_name].append([marker])
@@ -664,10 +670,18 @@ def projection():
                     f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
                     rotation = f(vicon['timestamp'])
                     final_vicon_data['rotation'][prop_name][-1] = rotation
+                    y = np.array(vicon_translation_buffer[prop_name])
+                    f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
+                    translation = f(vicon['timestamp'])
+                    final_vicon_data['translation'][prop_name][-1] = translation
                     for i in range(n_dv_cam):
                         cam_rotation = rotation_matrix_to_euler_angles_transposed(
                             np.dot(rotation, v_to_dv_rotation[i]))
                         final_vicon_data[f'camera_{i}_rotation'][prop_name][-1] = cam_rotation
+                    # TODO: figure this out
+                    #for i in range(n_dv_cam):
+                    #    cam_translation =
+                    #    final_vicon_data[f'camera_{i}_translation'][prop_name][-1] = cam_translation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_markers_buffer[prop_name][marker_name])
                         f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
@@ -684,20 +698,23 @@ def projection():
                     # clear frame buffer
                     vicon_timestamp_buffer[prop_name].clear()
                     vicon_rotation_buffer[prop_name].clear()
+                    vicon_translation_buffer[prop_name].clear()
                     for marker_name in props[prop_name].keys():
                         vicon_markers_buffer[prop_name][marker_name].clear()
 
                     # void bad frame data
-                    bad_data = np.full(3, np.nan)
                     a = max(0, len(final_vicon_data['timestamp']) - vicon_bad_frame_timeout + 1)
                     b = len(final_vicon_data['timestamp'])
-                    final_vicon_data['rotation'][prop_name][a:b] = bad_data
+                    final_vicon_data['rotation'][prop_name][a:b] = np.nan
+                    final_vicon_data['translation'][prop_name][a:b] = np.nan
                     for i in range(n_dv_cam):
-                        final_vicon_data[f'camera_{i}_rotation'][prop_name][a:b] = bad_data
+                        final_vicon_data[f'camera_{i}_rotation'][prop_name][a:b] = np.nan
+                    for i in range(n_dv_cam):
+                        final_vicon_data[f'camera_{i}_translation'][prop_name][a:b] = np.nan
                     for marker_name in props[prop_name].keys():
-                        final_vicon_data['markers'][prop_name][marker_name][a:b] = bad_data
+                        final_vicon_data['markers'][prop_name][marker_name][a:b] = np.nan
                         for i in range(n_dv_cam):
-                            final_vicon_data[f'camera_{i}_markers'][prop_name][marker_name][a:b] = bad_data
+                            final_vicon_data[f'camera_{i}_markers'][prop_name][marker_name][a:b] = np.nan
 
             # append good Vicon frame to buffer
             if frame_is_good:
@@ -709,6 +726,8 @@ def projection():
                 vicon_timestamp_buffer[prop_name].append(timestamp)
                 rotation = vicon['rotation'][prop_name]
                 vicon_rotation_buffer[prop_name].append(rotation)
+                translation = vicon['translation'][prop_name]
+                vicon_translation_buffer[prop_name].append(translation)
                 for marker_name in props[prop_name].keys():
                     marker = vicon['markers'][prop_name][marker_name]
                     vicon_markers_buffer[prop_name][marker_name].append(marker)
@@ -776,15 +795,19 @@ def projection():
     final_vicon_iter['timestamp'] = timestamp.iterrows()
     final_vicon_iter['extrapolated'] = {}
     final_vicon_iter['rotation'] = {}
+    final_vicon_iter['translation'] = {}
     final_vicon_iter['markers'] = {}
     for i in range(n_dv_cam):
         final_vicon_iter[f'camera_{i}_rotation'] = {}
+        final_vicon_iter[f'camera_{i}_translation'] = {}
         final_vicon_iter[f'camera_{i}_markers'] = {}
     for prop_name in props.keys():
         extrapolated = final_vicon_file.root.props[prop_name].extrapolated
         final_vicon_iter['extrapolated'][prop_name] = extrapolated.iterrows()
         rotation = final_vicon_file.root.props[prop_name].rotation
         final_vicon_iter['rotation'][prop_name] = rotation.iterrows()
+        translation = final_vicon_file.root.props[prop_name].translation
+        final_vicon_iter['translation'][prop_name] = translation.iterrows()
         final_vicon_iter['markers'][prop_name] = {}
         for marker_name in props[prop_name].keys():
             marker = final_vicon_file.root.props[prop_name].markers[marker_name]
@@ -792,6 +815,8 @@ def projection():
         for i in range(n_dv_cam):
             cam_rotation = final_vicon_file.root.props[prop_name][f'camera_{i}_rotation']
             final_vicon_iter[f'camera_{i}_rotation'][prop_name] = cam_rotation.iterrows()
+            cam_translation = final_vicon_file.root.props[prop_name][f'camera_{i}_translation']
+            final_vicon_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
             final_vicon_iter[f'camera_{i}_markers'][prop_name] = {}
             for marker_name in props[prop_name].keys():
                 cam_marker = final_vicon_file.root.props[prop_name][f'camera_{i}_markers'][marker_name]
