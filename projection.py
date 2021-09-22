@@ -222,22 +222,23 @@ def get_vicon(record_time, address, port, props, f_name):
 
                 # TODO: include mesh_to_v0 transformation in camera_* fields
 
-
                 # TODO: convert all rotation to rotation matrices (without transpose) and test
-                rotation_angles = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
-                rotation_angles = tait_bryan_angles_to_rotation_matrix_transposed(rotation_angles)
-                # TODO: compare 'rotation_angles' here to vicon rotation matrix below
+
+                #rotation_angles = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
+                #rotation_angles = tait_bryan_angles_to_rotation_matrix_transposed(rotation_angles)
+
+                # REMINDER: vicon rotation matrix is in transposed form, not standard math form
 
 
 
-                rotation = client.GetSegmentGlobalRotationMatrix(prop_name, root_segment)[0]
+                rotation = np.array(client.GetSegmentGlobalRotationMatrix(prop_name, root_segment)[0])
                 data['rotation'][prop_name].append([rotation])
 
-                translation = client.GetSegmentGlobalTranslation(prop_name, root_segment)[0]
+                translation = np.array(client.GetSegmentGlobalTranslation(prop_name, root_segment)[0])
                 data['translation'][prop_name].append([translation])
 
                 for marker_name in marker_names:
-                    marker = client.GetMarkerGlobalTranslation(prop_name, marker_name)[0]
+                    marker = np.array(client.GetMarkerGlobalTranslation(prop_name, marker_name)[0])
                     data['markers'][prop_name][marker_name].append([marker])
 
             else:
@@ -641,8 +642,7 @@ def projection():
             translation = vicon['translation'][prop_name]
             final_vicon_data['translation'][prop_name].append([translation])
             for i in range(n_dv_cam):
-                cam_rotation = rotation_matrix_to_euler_angles_transposed(
-                    np.dot(rotation, v_to_dv_rotation[i]))
+                cam_rotation = np.dot(rotation, v_to_dv_rotation[i])
                 final_vicon_data[f'camera_{i}_rotation'][prop_name].append([cam_rotation])
             for i in range(n_dv_cam):
                 cam_translation = np.dot(translation, v_to_dv_rotation[i]) + v_to_dv_translation[i]
@@ -682,8 +682,7 @@ def projection():
                     translation = f(vicon['timestamp'])
                     final_vicon_data['translation'][prop_name][-1] = translation
                     for i in range(n_dv_cam):
-                        cam_rotation = rotation_matrix_to_euler_angles_transposed(
-                            np.dot(rotation, v_to_dv_rotation[i]))
+                        cam_rotation = np.dot(rotation, v_to_dv_rotation[i])
                         final_vicon_data[f'camera_{i}_rotation'][prop_name][-1] = cam_rotation
                     for i in range(n_dv_cam):
                         cam_translation = np.dot(translation, v_to_dv_rotation[i]) + v_to_dv_translation[i]
