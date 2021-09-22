@@ -732,7 +732,6 @@ def calibrate():
     # 7 scale factor for stretch in x-direction due to camera calibration/undistortion
 
     # Vicon to DV transformation
-    m_file = [f'{path_projection}/v_to_dv_{i}_params.npy' for i in range(2)]
     m = [np.empty(8) for i in range(2)]
     for i in range(2):
         # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
@@ -764,16 +763,32 @@ def calibrate():
                       dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
         print(f'camera {i} transform: final result has error: {err}')
 
-        # convert translation to millimetres
-        m[i][3:6] *= 10
 
         # save transform
-        np.save(m_file[i], m[i])
+        v_to_dv_rotation_file = f'{path_projection}/v_to_dv_{i}_rotation.npy'
+        v_to_dv_rotation = euler_angles_to_rotation_matrix_transposed(m[i][0:3])
+        np.save(v_to_dv_rotation_file, v_to_dv_rotation)
 
-        print("Euler angles: {}".format(m[i][0:3]))
-        print("Translation: {}".format(m[i][3:6]))
-        print("focal length rescale: {}".format(m[i][6]))
-        print("x rescale: {}".format(m[i][7]))
+        v_to_dv_translation_file = f'{path_projection}/v_to_dv_{i}_translation.npy'
+        v_to_dv_translation = m[i][3:6] * 10 # convert from cm to mm
+        np.save(v_to_dv_translation_file, v_to_dv_translation)
+
+        v_to_dv_f_len_scale_file = f'{path_projection}/v_to_dv_{i}_focal_length_scale.npy'
+        v_to_dv_f_len_scale = m[i][6]
+        np.save(v_to_dv_f_len_scale_file, v_to_dv_f_len_scale)
+
+        v_to_dv_x_scale_file = f'{path_projection}/v_to_dv_{i}_x_scale.npy'
+        v_to_dv_x_scale = m[i][7]
+        np.save(v_to_dv_x_scale_file, v_to_dv_x_scale)
+
+        print('rotation:')
+        print(v_to_dv_rotation)
+        print('translation:')
+        print(v_to_dv_translation)
+        print('focal length scale:')
+        print(v_to_dv_f_len_scale)
+        print('x axis scale:')
+        print(v_to_dv_x_scale)
         print()
 
     #########################################################################

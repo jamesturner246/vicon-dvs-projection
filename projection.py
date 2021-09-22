@@ -417,12 +417,17 @@ def projection():
     dv_cam_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(n_dv_cam)]
     dv_cam_dist = [np.load(file_name) for file_name in dv_cam_dist_file_name]
 
-    v_to_dv_params_file_name = [f'{path_projection}/v_to_dv_{i}_params.npy' for i in range(n_dv_cam)]
-    v_to_dv_params = [np.load(file_name) for file_name in v_to_dv_params_file_name]
-    v_to_dv_rotation = [euler_angles_to_rotation_matrix_transposed(v_to_dv_params[i][0:3]) for i in range(n_dv_cam)]
-    v_to_dv_translation = [v_to_dv_params[i][3:6] for i in range(n_dv_cam)]
-    v_to_dv_focal_length = [dv_cam_nominal_focal_length[i] * v_to_dv_params[i][6] for i in range(n_dv_cam)]
-    v_to_dv_x_scale = [v_to_dv_params[i][7] for i in range(n_dv_cam)]
+    v_to_dv_rotation_file = [f'{path_projection}/v_to_dv_{i}_rotation.npy' for i in range(n_dv_cam)]
+    v_to_dv_rotation = [np.load(name) for name in v_to_dv_rotation_file]
+
+    v_to_dv_translation_file = [f'{path_projection}/v_to_dv_{i}_translation.npy' for i in range(n_dv_cam)]
+    v_to_dv_translation = [np.load(name) for name in v_to_dv_translation_file]
+
+    v_to_dv_f_len_scale_file = [f'{path_projection}/v_to_dv_{i}_focal_length_scale.npy' for i in range(n_dv_cam)]
+    v_to_dv_f_len_scale = [np.load(name) for name in v_to_dv_f_len_scale_file]
+
+    v_to_dv_x_scale_file = [f'{path_projection}/v_to_dv_{i}_x_scale.npy' for i in range(n_dv_cam)]
+    v_to_dv_x_scale = [np.load(name) for name in v_to_dv_x_scale_file]
 
 
     ##################################################################
@@ -970,7 +975,7 @@ def projection():
                 dv_space_p = np.matmul(vicon_space_p, v_to_dv_rotation[i]) + v_to_dv_translation[i]
                 dv_space_p[:, :, :2] *= (1 / dv_space_p[:, :, 2, np.newaxis])
                 dv_space_p = dv_space_p[:, :, :2]
-                dv_space_p *= v_to_dv_focal_length[i]
+                dv_space_p *= v_to_dv_f_len_scale[i]
                 dv_space_p /= dv_cam_pixel_mm[i]
                 dv_space_p *= v_to_dv_x_scale[i]
                 dv_space_p += [dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i]]
