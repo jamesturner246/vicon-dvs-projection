@@ -545,14 +545,14 @@ def projection():
     method = 'nelder-mead'
     options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
-    def err_fun_mesh_to_v0(params, mesh_ps, vicon_ps, v0_to_v_rotations, v0_to_v_translations):
+    def err_fun_mesh_to_v0(m, mesh_ps, vicon_ps, v0_to_v_rotations, v0_to_v_translations):
         error= 0
 
         for mesh_p, vicon_p, v0_to_v_translation, v0_to_v_rotation in zip(
                 mesh_ps, vicon_ps, v0_to_v_translations, v0_to_v_rotations):
 
-            mesh_to_v0_rotation = euler_angles_to_rotation_matrix_transposed(params[0:3])
-            mesh_to_v0_translation = params[3:6]
+            mesh_to_v0_rotation = euler_angles_to_rotation_matrix_transposed(m[0:3])
+            mesh_to_v0_translation = m[3:6]
 
             v0_p = np.dot(mesh_p, mesh_to_v0_rotation) + mesh_to_v0_translation
 
@@ -568,44 +568,46 @@ def projection():
         v0_to_v_rotations = []
         v0_to_v_translations = []
 
-        #params = np.zeros(6, dtype='float64')
-        #params = np.random.rand(6) * 2 * np.pi - np.pi
-        params = np.array([-0.23134114, -2.83301699,  2.81133181, -1.54930157, -2.35502374,  2.1578688 ])
+        #m = np.zeros(6, dtype='float64')
+        #m = np.random.rand(6) * 2 * np.pi - np.pi
+        m = np.array([-0.23134114, -2.83301699,  2.81133181, -1.54930157, -2.35502374,  2.1578688 ])
 
-        for i_vicon in range(0, 1000, 100):
-            i_marker = 0
-            mesh_marker= np.empty((len(props[prop_name]), 3), dtype='float64')
-            vicon_marker= np.empty(mesh_marker.shape, dtype='float64')
-            for marker_name in props[prop_name].keys():
+        indices = np.linspace(0, len(raw_vicon_file.root.timestamp) - 1, 100, dtype='uint64')
+        for i_vicon in indices:
+            rotation = raw_vicon_file.root.props[prop_name].rotation[i_vicon]
+            translation = raw_vicon_file.root.props[prop_name].translation[i_vicon]
+
+            if not np.isfinite(rotation).all() or not np.isfinite(translation).all():
+                continue
+
+            mesh_marker = np.empty((len(props[prop_name]), 3), dtype='float64')
+            vicon_marker = np.empty(mesh_marker.shape, dtype='float64')
+            for i_marker, marker_name in enumerate(props[prop_name].keys()):
                 mesh_marker[i_marker] = props[prop_name][marker_name]
                 vicon_marker[i_marker] = raw_vicon_file.root.props[prop_name].markers[marker_name][i_vicon]
-                i_marker += 1
+
             mesh_markers.append(mesh_marker)
             vicon_markers.append(vicon_marker)
-
-            rotation = raw_vicon_file.root.props[prop_name].rotation[i_vicon]
             v0_to_v_rotations.append(rotation.T)
-
-            translation = raw_vicon_file.root.props[prop_name].translation[i_vicon]
             v0_to_v_translations.append(translation)
 
-        print(params)
+        print(m)
         err = err_fun_mesh_to_v0(
-            params, mesh_markers, vicon_markers, v0_to_v_rotations, v0_to_v_translations)
+            m, mesh_markers, vicon_markers, v0_to_v_rotations, v0_to_v_translations)
         print(f'{prop_name} mesh to vicon transform: original guess has error: {err}')
 
         result = minimize(
-            err_fun_mesh_to_v0, params, method=method, options=options,
+            err_fun_mesh_to_v0, m, method=method, options=options,
             args=(mesh_markers, vicon_markers, v0_to_v_rotations, v0_to_v_translations))
-        params = result['x']
+        m = result['x']
 
-        print(params)
+        print(m)
         err = err_fun_mesh_to_v0(
-            params, mesh_markers, vicon_markers, v0_to_v_rotations, v0_to_v_translations)
+            m, mesh_markers, vicon_markers, v0_to_v_rotations, v0_to_v_translations)
         print(f'{prop_name} mesh to vicon transform: final result has error: {err}')
 
-        mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix_transposed(params[0:3])
-        mesh_to_v0_translation[prop_name] = params[3:6]
+        mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix_transposed(m[0:3])
+        mesh_to_v0_translation[prop_name] = m[3:6]
 
         mesh_v0[prop_name] = np.matmul(mesh[prop_name], mesh_to_v0_rotation[prop_name])
         mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
