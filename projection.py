@@ -16,7 +16,7 @@ import stl
 import cv2
 import dv
 
-from calibrate_projection import euler_angles_to_rotation_matrix_transposed
+from calibrate_projection import euler_angles_to_rotation_matrix
 
 n_dv_cam = 1
 
@@ -499,12 +499,12 @@ def projection():
         for mesh_p, vicon_p, v0_to_v_translation, v0_to_v_rotation in zip(
                 mesh_ps, vicon_ps, v0_to_v_translations, v0_to_v_rotations):
 
-            mesh_to_v0_rotation = euler_angles_to_rotation_matrix_transposed(m[0:3])
+            mesh_to_v0_rotation = euler_angles_to_rotation_matrix(m[0:3])
             mesh_to_v0_translation = m[3:6]
 
-            v0_p = np.dot(mesh_p, mesh_to_v0_rotation) + mesh_to_v0_translation
+            v0_p = np.dot(mesh_to_v0_rotation, mesh_p) + mesh_to_v0_translation
 
-            output = np.dot(v0_p, v0_to_v_rotation) + v0_to_v_translation
+            output = np.dot(v0_to_v_rotation, v0_p) + v0_to_v_translation
             difference = output - vicon_p
             error += np.sqrt(np.mean(difference ** 2))
 
@@ -536,7 +536,7 @@ def projection():
 
             mesh_markers.append(mesh_marker)
             vicon_markers.append(vicon_marker)
-            v0_to_v_rotations.append(rotation.T)
+            v0_to_v_rotations.append(rotation)
             v0_to_v_translations.append(translation)
 
         print(m)
@@ -554,10 +554,10 @@ def projection():
             m, mesh_markers, vicon_markers, v0_to_v_rotations, v0_to_v_translations)
         print(f'{prop_name} mesh to vicon transform: final result has error: {err}')
 
-        mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix_transposed(m[0:3])
+        mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix(m[0:3])
         mesh_to_v0_translation[prop_name] = m[3:6]
 
-        props_mesh_v0[prop_name] = np.matmul(props_mesh[prop_name], mesh_to_v0_rotation[prop_name])
+        props_mesh_v0[prop_name] = np.matmul(mesh_to_v0_rotation[prop_name], props_mesh[prop_name])
         props_mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
 
 
@@ -647,16 +647,16 @@ def projection():
             translation = vicon['translation'][prop_name]
             final_vicon_data['translation'][prop_name].append([translation])
             for i in range(n_dv_cam):
-                cam_rotation = np.dot(rotation, v_to_dv_rotation[i])
+                cam_rotation = np.dot(v_to_dv_rotation[i], rotation)
                 final_vicon_data[f'camera_{i}_rotation'][prop_name].append([cam_rotation])
             for i in range(n_dv_cam):
-                cam_translation = np.dot(translation, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                cam_translation = np.dot(v_to_dv_rotation[i], translation) + v_to_dv_translation[i]
                 final_vicon_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
             for marker_name in props_markers[prop_name].keys():
                 marker = vicon['markers'][prop_name][marker_name]
                 final_vicon_data['markers'][prop_name][marker_name].append([marker])
                 for i in range(n_dv_cam):
-                    cam_marker = np.dot(marker, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                    cam_marker = np.dot(v_to_dv_rotation[i], marker) + v_to_dv_translation[i]
                     final_vicon_data[f'camera_{i}_markers'][prop_name][marker_name].append([cam_marker])
 
             # check current Vicon frame
@@ -687,10 +687,10 @@ def projection():
                     translation = f(vicon['timestamp'])
                     final_vicon_data['translation'][prop_name][-1] = translation
                     for i in range(n_dv_cam):
-                        cam_rotation = np.dot(rotation, v_to_dv_rotation[i])
+                        cam_rotation = np.dot(v_to_dv_rotation[i], rotation)
                         final_vicon_data[f'camera_{i}_rotation'][prop_name][-1] = cam_rotation
                     for i in range(n_dv_cam):
-                        cam_translation = np.dot(translation, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                        cam_translation = np.dot(v_to_dv_rotation[i], translation) + v_to_dv_translation[i]
                         final_vicon_data[f'camera_{i}_translation'][prop_name][-1] = cam_translation
                     for marker_name in props_markers[prop_name].keys():
                         y = np.array(vicon_markers_buffer[prop_name][marker_name])
@@ -698,7 +698,7 @@ def projection():
                         marker = f(vicon['timestamp'])
                         final_vicon_data['markers'][prop_name][marker_name][-1] = marker
                         for i in range(n_dv_cam):
-                            cam_marker = np.dot(marker, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                            cam_marker = np.dot(v_to_dv_rotation[i], marker) + v_to_dv_translation[i]
                             final_vicon_data[f'camera_{i}_markers'][prop_name][marker_name][-1] = cam_marker
 
                 else: # bad frame timeout
@@ -949,18 +949,18 @@ def projection():
             #print(f'DEBUG: extrapolated {prop_name}:', vicon['extrapolated'][prop_name])
 
             # transform to Vicon space
-            v0_to_v_rotation = vicon['rotation'][prop_name].T
+            v0_to_v_rotation = vicon['rotation'][prop_name]
             v0_to_v_translation = vicon['translation'][prop_name]
 
             if not np.isfinite(v0_to_v_rotation).all() or not np.isfinite(v0_to_v_translation).all():
                 prop_masks[i][prop_name].fill(0)
                 continue
 
-            vicon_space_p = np.matmul(props_mesh_v0[prop_name], v0_to_v_rotation) + v0_to_v_translation
+            vicon_space_p = np.matmul(v0_to_v_rotation, props_mesh_v0[prop_name]) + v0_to_v_translation
 
             # transform to DV camera space
             for i in range(n_dv_cam):
-                dv_space_p = np.matmul(vicon_space_p, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                dv_space_p = np.matmul(v_to_dv_rotation[i], vicon_space_p) + v_to_dv_translation[i]
                 dv_space_p[:, :, :2] *= (1 / dv_space_p[:, :, 2, np.newaxis])
                 dv_space_p = dv_space_p[:, :, :2]
                 dv_space_p *= v_to_dv_f_len[i]
