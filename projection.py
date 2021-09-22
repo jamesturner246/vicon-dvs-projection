@@ -625,12 +625,23 @@ def projection():
 
         # TODO: add full transform (from mesh) to rotation, cam_rotation, etc
 
+        # NOTE: need to start at mesh space root segment (mean mesh space marker translation)
+
 
 
 
         # for each prop
         for prop_name in props_markers.keys():
             final_vicon_data['extrapolated'][prop_name].append([False])
+
+
+
+            #mesh_to_v0_rotation
+
+            #mesh_to_v0_translation
+
+
+
             rotation = vicon['rotation'][prop_name]
             final_vicon_data['rotation'][prop_name].append([rotation])
             translation = vicon['translation'][prop_name]
@@ -645,7 +656,7 @@ def projection():
                 marker = vicon['markers'][prop_name][marker_name]
                 final_vicon_data['markers'][prop_name][marker_name].append([marker])
                 for i in range(n_dv_cam):
-                    cam_marker = np.matmul(marker, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                    cam_marker = np.dot(marker, v_to_dv_rotation[i]) + v_to_dv_translation[i]
                     final_vicon_data[f'camera_{i}_markers'][prop_name][marker_name].append([cam_marker])
 
             # check current Vicon frame
@@ -687,7 +698,7 @@ def projection():
                         marker = f(vicon['timestamp'])
                         final_vicon_data['markers'][prop_name][marker_name][-1] = marker
                         for i in range(n_dv_cam):
-                            cam_marker = np.matmul(marker, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                            cam_marker = np.dot(marker, v_to_dv_rotation[i]) + v_to_dv_translation[i]
                             final_vicon_data[f'camera_{i}_markers'][prop_name][marker_name][-1] = cam_marker
 
                 else: # bad frame timeout
