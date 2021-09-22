@@ -220,6 +220,9 @@ def get_vicon(record_time, address, port, props, f_name):
 
 
 
+                # TODO: include mesh_to_v0 transformation in camera_* fields
+
+
                 # TODO: convert all rotation to rotation matrices (without transpose) and test
                 rotation_angles = client.GetSegmentGlobalRotationEulerXYZ(prop_name, root_segment)[0]
                 rotation_angles = tait_bryan_angles_to_rotation_matrix_transposed(rotation_angles)
@@ -636,10 +639,9 @@ def projection():
                 cam_rotation = rotation_matrix_to_euler_angles_transposed(
                     np.dot(rotation, v_to_dv_rotation[i]))
                 final_vicon_data[f'camera_{i}_rotation'][prop_name].append([cam_rotation])
-            # TODO: figure this out
-            #for i in range(n_dv_cam):
-            #    cam_translation =
-            #    final_vicon_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
+            for i in range(n_dv_cam):
+                cam_translation = np.dot(translation, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                final_vicon_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
             for marker_name in props[prop_name].keys():
                 marker = vicon['markers'][prop_name][marker_name]
                 final_vicon_data['markers'][prop_name][marker_name].append([marker])
@@ -678,10 +680,9 @@ def projection():
                         cam_rotation = rotation_matrix_to_euler_angles_transposed(
                             np.dot(rotation, v_to_dv_rotation[i]))
                         final_vicon_data[f'camera_{i}_rotation'][prop_name][-1] = cam_rotation
-                    # TODO: figure this out
-                    #for i in range(n_dv_cam):
-                    #    cam_translation =
-                    #    final_vicon_data[f'camera_{i}_translation'][prop_name][-1] = cam_translation
+                    for i in range(n_dv_cam):
+                        cam_translation = np.dot(translation, v_to_dv_rotation[i]) + v_to_dv_translation[i]
+                        final_vicon_data[f'camera_{i}_translation'][prop_name][-1] = cam_translation
                     for marker_name in props[prop_name].keys():
                         y = np.array(vicon_markers_buffer[prop_name][marker_name])
                         f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')

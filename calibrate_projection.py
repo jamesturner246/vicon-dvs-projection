@@ -349,6 +349,15 @@ def get_dv_coordinates(path, i_epoch, address, event_port, frame_port, prop_name
     return coordinates
 
 
+
+
+
+
+
+
+
+
+
 def vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
     focal_length = nominal_focal_length * m[6]
     z = vicon_to_camera_centric(v, m)
@@ -378,37 +387,6 @@ def vicon_to_camera_centric(v, m):
 
 
 
-
-
-"""
-Vicon Euler angles appear to be Tait-Bryan angles:
-m[0] - rotation around x axis in [-pi, pi]
-m[1] - rotation around (new) y axis [-pi/2, pi/2]
-m[2] - rotation around (new) z axis [-pi, pi]
-positive angles are counter-clockwise if looking towards the origin
-"""
-
-def tait_bryan_angles_to_rotation_matrix(m):
-
-    M= np.array([
-        [  1,             0,             0             ],
-        [  0,             np.cos(m[0]),  np.sin(m[0])  ],
-        [  0,            -np.sin(m[0]),  np.cos(m[0])  ],
-    ])
-
-    M= np.dot(np.array([
-        [  np.cos(m[1]),  0,            -np.sin(m[1])  ],
-        [  0,             1,             0             ],
-        [  np.sin(m[1]),  0,             np.cos(m[1])  ],
-    ]), M)
-
-    M= np.dot(np.array([
-        [  np.cos(m[2]),  np.sin(m[2]),  0             ],
-        [ -np.sin(m[2]),  np.cos(m[2]),  0             ],
-        [  0,             0,             1             ],
-    ]), M)
-
-    return M
 
 
 """
@@ -547,6 +525,50 @@ def rotation_matrix_to_euler_angles_transposed(M):
     return m
 
 
+
+
+
+
+
+
+"""
+Vicon Euler angles appear to be Tait-Bryan angles:
+m[0] - rotation around x axis in [-pi, pi]
+m[1] - rotation around (new) y axis [-pi/2, pi/2]
+m[2] - rotation around (new) z axis [-pi, pi]
+positive angles are counter-clockwise if looking towards the origin
+"""
+
+def tait_bryan_angles_to_rotation_matrix(m):
+
+    M= np.array([
+        [  1,             0,             0             ],
+        [  0,             np.cos(m[0]),  np.sin(m[0])  ],
+        [  0,            -np.sin(m[0]),  np.cos(m[0])  ],
+    ])
+
+    M= np.dot(np.array([
+        [  np.cos(m[1]),  0,            -np.sin(m[1])  ],
+        [  0,             1,             0             ],
+        [  np.sin(m[1]),  0,             np.cos(m[1])  ],
+    ]), M)
+
+    M= np.dot(np.array([
+        [  np.cos(m[2]),  np.sin(m[2]),  0             ],
+        [ -np.sin(m[2]),  np.cos(m[2]),  0             ],
+        [  0,             0,             1             ],
+    ]), M)
+
+    return M
+
+
+
+
+
+
+
+
+
 """
 Vicon Euler angles appear to be Tait-Bryan angles:
 m[0] - rotation around x axis in [-pi, pi]
@@ -577,6 +599,7 @@ def tait_bryan_angles_to_rotation_matrix_transposed(m):
 
     return M
         
+
 def rotation_matrix_to_tait_bryan_angles_transposed(M):
     tolerance= 1e-10
     m= np.empty(3)   
@@ -597,6 +620,17 @@ def rotation_matrix_to_tait_bryan_angles_transposed(M):
         else:
             m[2]= m[2]+np.pi
     return m
+
+
+
+
+
+
+
+
+
+
+
 
 
 def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
