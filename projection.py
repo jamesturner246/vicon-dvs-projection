@@ -17,8 +17,6 @@ import cv2
 import dv
 
 from calibrate_projection import euler_angles_to_rotation_matrix_transposed
-from calibrate_projection import rotation_matrix_to_euler_angles_transposed
-from calibrate_projection import tait_bryan_angles_to_rotation_matrix_transposed
 
 n_dv_cam = 1
 
@@ -483,59 +481,11 @@ def projection():
     ##################################################################
 
 
-
-    print('begin preprocessing')
-
     # load raw Vicon data
     raw_vicon_file = tables.open_file(raw_vicon_file_name, mode='r')
-    raw_vicon_iter = {}
-    timestamp = raw_vicon_file.root.timestamp
-    raw_vicon_iter['timestamp'] = timestamp.iterrows()
-    raw_vicon_iter['rotation'] = {}
-    raw_vicon_iter['translation'] = {}
-    raw_vicon_iter['markers'] = {}
-    for prop_name in props.keys():
-        rotation = raw_vicon_file.root.props[prop_name].rotation
-        raw_vicon_iter['rotation'][prop_name] = rotation.iterrows()
-        translation = raw_vicon_file.root.props[prop_name].translation
-        raw_vicon_iter['translation'][prop_name] = translation.iterrows()
-        raw_vicon_iter['markers'][prop_name] = {}
-        for marker_name in props[prop_name].keys():
-            marker = raw_vicon_file.root.props[prop_name].markers[marker_name]
-            raw_vicon_iter['markers'][prop_name][marker_name] = marker.iterrows()
 
     # create final Vicon data file
     final_vicon_file, final_vicon_data = create_vicon_file(final_vicon_file_name, props)
-
-    # initialise good Vicon frame buffer
-    vicon_timestamp_buffer = {}
-    vicon_rotation_buffer = {}
-    vicon_translation_buffer = {}
-    vicon_markers_buffer = {}
-    for prop_name in props.keys():
-        vicon_timestamp_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
-        vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
-        vicon_translation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
-        vicon_markers_buffer[prop_name] = {}
-        for marker_name in props[prop_name].keys():
-            vicon_markers_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
-
-    vicon = get_next_vicon(raw_vicon_iter)
-
-    # append to good Vicon frame buffers
-    for prop_name in props.keys():
-        timestamp = vicon['timestamp']
-        vicon_timestamp_buffer[prop_name].append(timestamp)
-        rotation = vicon['rotation'][prop_name]
-        vicon_rotation_buffer[prop_name].append(rotation)
-        translation = vicon['translation'][prop_name]
-        vicon_translation_buffer[prop_name].append(translation)
-        for marker_name in props[prop_name].keys():
-            marker = vicon['markers'][prop_name][marker_name]
-            vicon_markers_buffer[prop_name][marker_name].append(marker)
-
-    vicon = get_next_vicon(raw_vicon_iter)
-
 
     # get transforms from mesh space to Vicon space zero
     mesh_to_v0_rotation = {}
@@ -613,8 +563,55 @@ def projection():
         mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
 
 
-
     # === PREPROCESS VICON DATA ===
+    print('begin preprocessing')
+
+    # get raw Vicon data iterators
+    raw_vicon_iter = {}
+    timestamp = raw_vicon_file.root.timestamp
+    raw_vicon_iter['timestamp'] = timestamp.iterrows()
+    raw_vicon_iter['rotation'] = {}
+    raw_vicon_iter['translation'] = {}
+    raw_vicon_iter['markers'] = {}
+    for prop_name in props.keys():
+        rotation = raw_vicon_file.root.props[prop_name].rotation
+        raw_vicon_iter['rotation'][prop_name] = rotation.iterrows()
+        translation = raw_vicon_file.root.props[prop_name].translation
+        raw_vicon_iter['translation'][prop_name] = translation.iterrows()
+        raw_vicon_iter['markers'][prop_name] = {}
+        for marker_name in props[prop_name].keys():
+            marker = raw_vicon_file.root.props[prop_name].markers[marker_name]
+            raw_vicon_iter['markers'][prop_name][marker_name] = marker.iterrows()
+
+    # initialise good Vicon frame buffer
+    vicon_timestamp_buffer = {}
+    vicon_rotation_buffer = {}
+    vicon_translation_buffer = {}
+    vicon_markers_buffer = {}
+    for prop_name in props.keys():
+        vicon_timestamp_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
+        vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
+        vicon_translation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
+        vicon_markers_buffer[prop_name] = {}
+        for marker_name in props[prop_name].keys():
+            vicon_markers_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
+
+    vicon = get_next_vicon(raw_vicon_iter)
+
+    # append to good Vicon frame buffers
+    for prop_name in props.keys():
+        timestamp = vicon['timestamp']
+        vicon_timestamp_buffer[prop_name].append(timestamp)
+        rotation = vicon['rotation'][prop_name]
+        vicon_rotation_buffer[prop_name].append(rotation)
+        translation = vicon['translation'][prop_name]
+        vicon_translation_buffer[prop_name].append(translation)
+        for marker_name in props[prop_name].keys():
+            marker = vicon['markers'][prop_name][marker_name]
+            vicon_markers_buffer[prop_name][marker_name].append(marker)
+
+    vicon = get_next_vicon(raw_vicon_iter)
+
     bad_frame_count = 0
     while True:
 
@@ -624,6 +621,14 @@ def projection():
             break
 
         final_vicon_data['timestamp'].append([vicon['timestamp']])
+
+
+
+
+        # TODO: add full transform (from mesh) to rotation, cam_rotation, etc
+
+
+
 
         # for each prop
         for prop_name in props.keys():
