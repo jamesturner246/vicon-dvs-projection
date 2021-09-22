@@ -349,13 +349,14 @@ def get_dv_coordinates(path, i_epoch, address, event_port, frame_port, prop_name
     return coordinates
 
 
+def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
+    error = 0.0
+    for v, d in zip(vicon_p, dv_p):
+        output = vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm)
+        difference = output - d
+        error += np.dot(difference, difference)
 
-
-
-
-
-
-
+    return np.sqrt(error)
 
 
 def vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
@@ -373,20 +374,10 @@ def vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pi
 
 
 def vicon_to_camera_centric(v, m):
-    M = euler_angles_to_rotation_matrix_transposed(m[0:3])
-    z = np.dot(v, M)    # apply the rotation to get into the camera orientation frame
+    M = euler_angles_to_rotation_matrix(m[0:3])
+    z = np.dot(M, v)    # apply the rotation to get into the camera orientation frame
     z += m[3:6] * 10    # add the translation (using cm for a better scale of fitting)
     return z
-
-
-
-
-
-
-
-
-
-
 
 
 """
@@ -417,15 +408,6 @@ def euler_angles_to_rotation_matrix(m):
     return M
 
 
-
-
-
-
-
-########################################################
-
-# TODO: should we transpose below properly for standard math notation ???
-
 """
 Note that we are using ranges for Euler angles as follows:
 m[0] (alpha) in [-pi, pi]
@@ -434,7 +416,7 @@ m[2] (gamma) in [-pi, pi]
 """
 
 def rotation_matrix_to_euler_angles(M):
-    M=M.T
+    M = M.T
     tolerance= 1e-10
     m= np.empty(3)
     m[0]= np.arctan(M[0,2]/M[1,2])
@@ -454,81 +436,6 @@ def rotation_matrix_to_euler_angles(M):
         else:
             m[2]= m[2]+np.pi
     return m
-
-#######################################################
-
-
-
-
-
-
-
-
-
-
-
-"""
-We use a convention where vectors as row vectors and matrices are multipied from the right.
-As for Euler angles we use the z1 -> x′ -> z2″ convention corresponding to the product
-Z(m[0])*X(m[1])*Z(m[2])
-"""  
-
-def euler_angles_to_rotation_matrix_transposed(m):
-
-    M = np.array([
-        [  np.cos(m[0]),  np.sin(m[0]),  0            ],
-        [ -np.sin(m[0]),  np.cos(m[0]),  0            ],
-        [  0,             0,             1            ],
-    ])
-
-    M = np.dot(M, np.array([
-        [  1,             0,             0            ],
-        [  0,             np.cos(m[1]),  np.sin(m[1]) ],
-        [  0,            -np.sin(m[1]),  np.cos(m[1]) ],
-    ]))
-
-    M = np.dot(M, np.array([
-        [  np.cos(m[2]),  np.sin(m[2]),  0            ],
-        [ -np.sin(m[2]),  np.cos(m[2]),  0            ],
-        [  0,             0,             1            ],
-    ]))
-
-    return M
-
-
-"""
-Note that we are using ranges for Euler angles as follows:
-m[0] (alpha) in [-pi, pi]
-m[1] (beta) in [0, pi]
-m[2] (gamma) in [-pi, pi]
-"""
-
-def rotation_matrix_to_euler_angles_transposed(M):
-    tolerance= 1e-10
-    m= np.empty(3)   
-    m[0]= np.arctan(M[0,2]/M[1,2])
-    m[1]= np.arccos(M[2,2])
-    m[2]= np.arctan(-M[2,0]/M[2,1])
-    # problem: Euler angles alpha and gamma are [-pi, pi] not just [-pi/2, pi/2] as produced by arctan. Need to find out whether we have the right angle for alpha and gamma:
-    # M[0,2] == sin(m[0])*sin(m[1]) can be used to check m[0] - it needs to produce the correct sign
-    if M[0,2]*np.sin(m[0])*np.sin(m[1]) < 0.0:
-        if m[0] > 0.0:
-            m[0]= m[0]-np.pi
-        else:
-            m[0]= m[0]+np.pi
-    # M[2,0] == sin(m[1])*sin(m[2]) can be used to check m[2] - it needs to produce the correct sign
-    if M[2,0]*np.sin(m[1])*np.sin(m[2]) < 0.0:
-        if m[2] > 0.0:
-            m[2]= m[2]-np.pi
-        else:
-            m[2]= m[2]+np.pi
-    return m
-
-
-
-
-
-
 
 
 """
@@ -562,45 +469,8 @@ def tait_bryan_angles_to_rotation_matrix(m):
     return M
 
 
-
-
-
-
-
-
-
-"""
-Vicon Euler angles appear to be Tait-Bryan angles:
-m[0] - rotation around x axis in [-pi, pi]
-m[1] - rotation around (new) y axis [-pi/2, pi/2]
-m[2] - rotation around (new) z axis [-pi, pi]
-positive angles are counter-clockwise if looking towards the origin
-"""
-
-def tait_bryan_angles_to_rotation_matrix_transposed(m):
-
-    M= np.array([
-        [  1,             0,             0             ],
-        [  0,             np.cos(m[0]), -np.sin(m[0])  ],
-        [  0,             np.sin(m[0]),  np.cos(m[0])  ],
-    ])
-
-    M= np.dot(M, np.array([
-        [  np.cos(m[1]),  0,             np.sin(m[1])  ],
-        [  0,             1,             0             ],
-        [ -np.sin(m[1]),  0,             np.cos(m[1])  ],
-    ]))
-
-    M= np.dot(M, np.array([
-        [  np.cos(m[2]), -np.sin(m[2]),  0             ],
-        [  np.sin(m[2]),  np.cos(m[2]),  0             ],
-        [  0,             0,             1             ],
-    ]))
-
-    return M
-        
-
-def rotation_matrix_to_tait_bryan_angles_transposed(M):
+def rotation_matrix_to_tait_bryan_angles(M):
+    M = M.T
     tolerance= 1e-10
     m= np.empty(3)   
     m[0]= np.arctan(-M[1,2]/M[2,2])
@@ -620,27 +490,6 @@ def rotation_matrix_to_tait_bryan_angles_transposed(M):
         else:
             m[2]= m[2]+np.pi
     return m
-
-
-
-
-
-
-
-
-
-
-
-
-
-def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
-    error = 0.0
-    for v, d in zip(vicon_p, dv_p):
-        output = vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm)
-        difference = output - d
-        error += np.dot(difference, difference)
-
-    return np.sqrt(error)
 
 
 def calibrate():
@@ -766,7 +615,7 @@ def calibrate():
 
         # save transform
         v_to_dv_rotation_file = f'{path_projection}/v_to_dv_{i}_rotation.npy'
-        v_to_dv_rotation = euler_angles_to_rotation_matrix_transposed(m[i][0:3])
+        v_to_dv_rotation = euler_angles_to_rotation_matrix(m[i][0:3])
         np.save(v_to_dv_rotation_file, v_to_dv_rotation)
 
         v_to_dv_translation_file = f'{path_projection}/v_to_dv_{i}_translation.npy'
