@@ -628,7 +628,7 @@ def projection():
             final_vicon_data['rotation'][prop_name].append([rotation])
 
             v0_to_v_translation = vicon['translation'][prop_name]
-            translation = props_translation[prop_name]
+            translation = props_translation[prop_name][:, np.newaxis]
             translation = np.dot(mesh_to_v0_rotation[prop_name], translation) + mesh_to_v0_translation[prop_name]
             translation = np.dot(v0_to_v_rotation, translation) + v0_to_v_translation
             final_vicon_data['translation'][prop_name].append([translation])
