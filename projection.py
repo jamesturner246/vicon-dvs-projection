@@ -7,8 +7,6 @@ import time
 import pause
 from multiprocessing import Process
 from scipy.optimize import minimize
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.linear_model import LinearRegression
 from scipy.interpolate import interp1d
 import numpy as np
 import tables
