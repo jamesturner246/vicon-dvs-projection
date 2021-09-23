@@ -658,12 +658,7 @@ def projection():
                 final_vicon_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
 
             for marker_name in props_markers[prop_name].keys():
-                v0_to_v_marker_translation = vicon['vicon_markers'][prop_name][marker_name]
-                marker = np.array(props_markers[prop_name][marker_name])[:, np.newaxis]
-                marker = np.dot(
-                    mesh_to_v0_rotation[prop_name], marker) + mesh_to_v0_translation[prop_name]
-                marker = np.dot(
-                    v0_to_v_rotation, marker) + v0_to_v_marker_translation
+                marker = vicon['vicon_markers'][prop_name][marker_name]
                 final_vicon_data['vicon_markers'][prop_name][marker_name].append([marker])
 
             # check current Vicon frame
