@@ -623,12 +623,13 @@ def projection():
             final_vicon_data['extrapolated'][prop_name].append([False])
 
             v0_to_v_rotation = vicon['rotation'][prop_name]
-            rotation = np.dot(v0_to_v_rotation, mesh_to_v0_rotation)
+            rotation = mesh_to_v0_rotation[prop_name]
+            rotation = np.dot(v0_to_v_rotation, rotation)
             final_vicon_data['rotation'][prop_name].append([rotation])
 
             v0_to_v_translation = vicon['translation'][prop_name]
             translation = props_translation[prop_name]
-            translation = np.dot(mesh_to_v0_rotation, translation) + mesh_to_v0_translation
+            translation = np.dot(mesh_to_v0_rotation[prop_name], translation) + mesh_to_v0_translation[prop_name]
             translation = np.dot(v0_to_v_rotation, translation) + v0_to_v_translation
             final_vicon_data['translation'][prop_name].append([translation])
 
@@ -643,7 +644,7 @@ def projection():
             for marker_name in props_markers[prop_name].keys():
                 v0_to_v_marker_translation = vicon['markers'][prop_name][marker_name]
                 marker = np.array(props_markers[prop_name][marker_name])[:, np.newaxis]
-                marker = np.dot(mesh_to_v0_rotation, marker) + mesh_to_v0_translation
+                marker = np.dot(mesh_to_v0_rotation[prop_name], marker) + mesh_to_v0_translation[prop_name]
                 marker = np.dot(v0_to_v_rotation, marker) + v0_to_v_marker_translation
                 final_vicon_data['markers'][prop_name][marker_name].append([marker])
 
