@@ -1001,11 +1001,7 @@ def projection():
                         prop_name = list(props_markers)[j]
                         mask = prop_masks[i][prop_name].astype('bool')
 
-                        prop_depth = 0.0
-                        for marker_name in props_markers[prop_name].keys():
-                            marker_depth = vicon[f'camera_{i}_markers'][prop_name][marker_name][2]
-                            prop_depth += marker_depth / len(props_markers[prop_name])
-
+                        prop_depth = vicon[f'camera_{i}_translation'][prop_name][2, 0]
                         label[mask & (prop_depth < label_depth)] = j
                         label_depth[mask & (prop_depth < label_depth)] = prop_depth
 
@@ -1076,11 +1072,7 @@ def projection():
                             prop_name = list(props_markers)[j]
                             mask = prop_masks[i][prop_name].astype('bool')
 
-                            prop_depth = 0.0
-                            for marker_name in props_markers[prop_name].keys():
-                                marker_depth = vicon[f'camera_{i}_markers'][prop_name][marker_name][2]
-                                prop_depth += marker_depth / len(props_markers[prop_name])
-
+                            prop_depth = vicon[f'camera_{i}_translation'][prop_name][2, 0]
                             if mask[xy_int[1], xy_int[0]]:
                                 if prop_depth < label_depth:
                                     label = j
