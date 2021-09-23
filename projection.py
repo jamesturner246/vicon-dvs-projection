@@ -94,7 +94,7 @@ def create_vicon_file(f_name, props_markers):
         g_markers = f.create_group(g_prop, 'markers')
         for marker_name in props_markers[prop_name].keys():
             data['markers'][prop_name][marker_name] = f.create_earray(
-                g_markers, marker_name, tables.atom.Float64Atom(), (0, 3))
+                g_markers, marker_name, tables.atom.Float64Atom(), (0, 3, 1))
         for i in range(n_dv_cam):
             data[f'camera_{i}_rotation'][prop_name] = f.create_earray(
                 g_prop, f'camera_{i}_rotation', tables.atom.Float64Atom(), (0, 3, 3))
@@ -104,7 +104,7 @@ def create_vicon_file(f_name, props_markers):
             g_camera_markers = f.create_group(g_prop, f'camera_{i}_markers')
             for marker_name in props_markers[prop_name].keys():
                 data[f'camera_{i}_markers'][prop_name][marker_name] = f.create_earray(
-                    g_camera_markers, marker_name, tables.atom.Float64Atom(), (0, 3))
+                    g_camera_markers, marker_name, tables.atom.Float64Atom(), (0, 3, 1))
 
     return f, data
 
@@ -220,22 +220,22 @@ def get_vicon(record_time, address, port, props_markers, f_name):
                 data['rotation'][prop_name].append([rotation])
 
                 translation = np.array(client.GetSegmentGlobalTranslation(prop_name, root_segment)[0])
-                data['translation'][prop_name].append([translation])
+                data['translation'][prop_name].append([translation[:, np.newaxis]])
 
                 for marker_name in marker_names:
                     marker = np.array(client.GetMarkerGlobalTranslation(prop_name, marker_name)[0])
-                    data['markers'][prop_name][marker_name].append([marker])
+                    data['markers'][prop_name][marker_name].append([marker[:, np.newaxis]])
 
             else:
                 rotation = np.full((3, 3), np.nan, dtype='float64')
                 data['rotation'][prop_name].append([rotation])
 
                 translation = np.full(3, np.nan, dtype='float64')
-                data['translation'][prop_name].append([translation])
+                data['translation'][prop_name].append([translation[:, np.newaxis]])
 
                 for marker_name in marker_names:
                     marker = np.full(3, np.nan, dtype='float64')
-                    data['markers'][prop_name][marker_name].append([marker])
+                    data['markers'][prop_name][marker_name].append([marker[:, np.newaxis]])
 
     client.Disconnect()
 
@@ -532,7 +532,7 @@ def projection():
             vicon_marker = np.empty(mesh_marker.shape, dtype='float64')
             for i_marker, marker_name in enumerate(props_markers[prop_name].keys()):
                 mesh_marker[:, i_marker] = props_markers[prop_name][marker_name]
-                vicon_marker[:, i_marker] = raw_vicon_file.root.props[prop_name].markers[marker_name][i_vicon]
+                vicon_marker[:, i_marker] = raw_vicon_file.root.props[prop_name].markers[marker_name][i_vicon][:, 0]
 
             mesh_markers.append(mesh_marker)
             vicon_markers.append(vicon_marker)
@@ -961,13 +961,16 @@ def projection():
             # transform to DV camera space
             for i in range(n_dv_cam):
                 dv_space_p = np.matmul(v_to_dv_rotation[i], vicon_space_p) + v_to_dv_translation[i]
-                dv_space_p[:, :, :2] *= (1 / dv_space_p[:, :, 2, np.newaxis])
-                dv_space_p = dv_space_p[:, :, :2]
+                dv_space_p[:, :2, :] *= (1 / dv_space_p[:, np.newaxis, 2, :])
+                dv_space_p = dv_space_p[:, :2, :]
                 dv_space_p *= v_to_dv_f_len[i]
                 dv_space_p /= dv_cam_pixel_mm[i]
                 dv_space_p *= v_to_dv_x_scale[i]
-                dv_space_p += [dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i]]
+                dv_space_p += [[dv_cam_origin_x_offset[i]], [dv_cam_origin_y_offset[i]]]
                 dv_space_p_int = np.rint(dv_space_p).astype('int32')
+
+                # transpose points for OpenCV
+                dv_space_p_int = dv_space_p_int.transpose(0, 2, 1)
 
                 # compute prop mask
                 prop_masks[i][prop_name].fill(0)
