@@ -619,7 +619,7 @@ def calibrate():
         np.save(v_to_dv_rotation_file, v_to_dv_rotation)
 
         v_to_dv_translation_file = f'{path_projection}/v_to_dv_{i}_translation.npy'
-        v_to_dv_translation = m[i][3:6] * 10 # convert from cm to mm
+        v_to_dv_translation = m[i][3:6, np.newaxis] * 10 # convert from cm to mm
         np.save(v_to_dv_translation_file, v_to_dv_translation)
 
         v_to_dv_f_len_scale_file = f'{path_projection}/v_to_dv_{i}_focal_length_scale.npy'

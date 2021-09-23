@@ -89,7 +89,7 @@ def create_vicon_file(f_name, props_markers):
         data['rotation'][prop_name] = f.create_earray(
             g_prop, 'rotation', tables.atom.Float64Atom(), (0, 3, 3))
         data['translation'][prop_name] = f.create_earray(
-            g_prop, 'translation', tables.atom.Float64Atom(), (0, 3))
+            g_prop, 'translation', tables.atom.Float64Atom(), (0, 3, 1))
         data['markers'][prop_name] = {}
         g_markers = f.create_group(g_prop, 'markers')
         for marker_name in props_markers[prop_name].keys():
@@ -99,7 +99,7 @@ def create_vicon_file(f_name, props_markers):
             data[f'camera_{i}_rotation'][prop_name] = f.create_earray(
                 g_prop, f'camera_{i}_rotation', tables.atom.Float64Atom(), (0, 3, 3))
             data[f'camera_{i}_translation'][prop_name] = f.create_earray(
-                g_prop, f'camera_{i}_translation', tables.atom.Float64Atom(), (0, 3))
+                g_prop, f'camera_{i}_translation', tables.atom.Float64Atom(), (0, 3, 1))
             data[f'camera_{i}_markers'][prop_name] = {}
             g_camera_markers = f.create_group(g_prop, f'camera_{i}_markers')
             for marker_name in props_markers[prop_name].keys():
@@ -363,7 +363,7 @@ def projection():
 
     # props_markers:      contains the translation of each marker, relative to prop origin
     # props_translation:  contains the translation of the root segment (mean marker translation)
-    # props_mesh:         contains prop STL meshes (polygon -> vertex -> translation)
+    # props_mesh:         contains prop STL meshes (polygon, translation, vertex)
 
     props_markers = {}
     props_translation = {}
@@ -377,7 +377,7 @@ def projection():
         'shaft_tip':   [-5.0,  164.0,  0.0  ],
     }
     props_translation['jt_screwdriver'] = np.mean(list(props_markers['jt_screwdriver'].values()), 0)
-    props_mesh['jt_screwdriver'] = stl.mesh.Mesh.from_file('./props/screwdriver.stl').vectors
+    props_mesh['jt_screwdriver'] = stl.mesh.Mesh.from_file('./props/screwdriver.stl').vectors.transpose(0, 2, 1)
 
     # # mallet mesh marker coordinates
     # props_markers['jt_mallet'] = {
@@ -387,7 +387,7 @@ def projection():
     #     'head_2':      [ 40.0,  0.0,  276.5 ],
     # }
     # props_translation['jt_mallet'] = np.mean(list(props_markers['jt_mallet'].values()), 0)
-    # props_mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl').vectors
+    # props_mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl').vectors.transpose(0, 2, 1)
 
 
 
@@ -500,7 +500,7 @@ def projection():
                 mesh_ps, vicon_ps, v0_to_v_translations, v0_to_v_rotations):
 
             mesh_to_v0_rotation = euler_angles_to_rotation_matrix(m[0:3])
-            mesh_to_v0_translation = m[3:6]
+            mesh_to_v0_translation = m[3:6, np.newaxis]
 
             v0_p = np.dot(mesh_to_v0_rotation, mesh_p) + mesh_to_v0_translation
 
@@ -528,11 +528,11 @@ def projection():
             if not np.isfinite(rotation).all() or not np.isfinite(translation).all():
                 continue
 
-            mesh_marker = np.empty((len(props_markers[prop_name]), 3), dtype='float64')
+            mesh_marker = np.empty((3, len(props_markers[prop_name])), dtype='float64')
             vicon_marker = np.empty(mesh_marker.shape, dtype='float64')
             for i_marker, marker_name in enumerate(props_markers[prop_name].keys()):
-                mesh_marker[i_marker] = props_markers[prop_name][marker_name]
-                vicon_marker[i_marker] = raw_vicon_file.root.props[prop_name].markers[marker_name][i_vicon]
+                mesh_marker[:, i_marker] = props_markers[prop_name][marker_name]
+                vicon_marker[:, i_marker] = raw_vicon_file.root.props[prop_name].markers[marker_name][i_vicon]
 
             mesh_markers.append(mesh_marker)
             vicon_markers.append(vicon_marker)
@@ -555,7 +555,7 @@ def projection():
         print(f'{prop_name} mesh to vicon transform: final result has error: {err}')
 
         mesh_to_v0_rotation[prop_name] = euler_angles_to_rotation_matrix(m[0:3])
-        mesh_to_v0_translation[prop_name] = m[3:6]
+        mesh_to_v0_translation[prop_name] = m[3:6, np.newaxis]
 
         props_mesh_v0[prop_name] = np.matmul(mesh_to_v0_rotation[prop_name], props_mesh[prop_name])
         props_mesh_v0[prop_name] += mesh_to_v0_translation[prop_name]
