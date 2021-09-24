@@ -337,7 +337,7 @@ def projection():
     test_number = 0
 
     date = time.strftime('%Y%m%d')
-    #date = 20210914
+    date = 20210923
     initials = 'jt'
 
     path_camera = './camera_calibration'

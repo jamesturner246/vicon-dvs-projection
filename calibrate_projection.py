@@ -440,37 +440,35 @@ def rotation_matrix_to_euler_angles(M):
 
 """
 Vicon Euler angles appear to be Tait-Bryan angles:
-m[0] - rotation around x axis in [-pi, pi]
+m[0] - rotation around z axis in [-pi, pi] 
 m[1] - rotation around (new) y axis [-pi/2, pi/2]
-m[2] - rotation around (new) z axis [-pi, pi]
-positive angles are counter-clockwise if looking towards the origin
+m[2] - rotation around (new) x axis [-pi, pi]
+positive angles are counter-clockwise if looking from positive values towards the origin
 """
 
 def tait_bryan_angles_to_rotation_matrix(m):
 
     M= np.array([
-        [  1,             0,             0             ],
-        [  0,             np.cos(m[0]),  np.sin(m[0])  ],
-        [  0,            -np.sin(m[0]),  np.cos(m[0])  ],
+        [  np.cos(m[2]), -np.sin(m[2]),  0             ],
+        [  np.sin(m[2]),  np.cos(m[2]),  0             ],
+        [  0,             0,             1             ],
     ])
 
     M= np.dot(np.array([
-        [  np.cos(m[1]),  0,            -np.sin(m[1])  ],
+        [  np.cos(m[1]),  0,             np.sin(m[1])  ],
         [  0,             1,             0             ],
-        [  np.sin(m[1]),  0,             np.cos(m[1])  ],
+        [ -np.sin(m[1]),  0,             np.cos(m[1])  ],
     ]), M)
 
     M= np.dot(np.array([
-        [  np.cos(m[2]),  np.sin(m[2]),  0             ],
-        [ -np.sin(m[2]),  np.cos(m[2]),  0             ],
-        [  0,             0,             1             ],
+        [  1,             0,             0             ],
+        [  0,             np.cos(m[0]), -np.sin(m[0])  ],
+        [  0,             np.sin(m[0]),  np.cos(m[0])  ],
     ]), M)
 
     return M
 
-
 def rotation_matrix_to_tait_bryan_angles(M):
-    M = M.T
     tolerance= 1e-10
     m= np.empty(3)   
     m[0]= np.arctan(-M[1,2]/M[2,2])
