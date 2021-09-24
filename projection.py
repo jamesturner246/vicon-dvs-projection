@@ -179,25 +179,25 @@ def get_dv(camera, aedat_file_name, mtx, dist,
             frames = f[f'frames_{camera}']
 
         # get events
-        for event in event_f:
+        for event in events:
             event_xy_raw = np.array([event.x, event.y], dtype='float64')
             event_xy_undistorted = cv2.undistortPoints(
                 event_xy_raw, mtx, dist, None, mtx)[0, 0]
 
-            data[f'timestamp_{camera}'].append([event.timestamp])
-            data[f'polarity_{camera}'].append([event.polarity])
-            data[f'xy_raw_{camera}'].append([event_xy_raw])
-            data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
+            event_data[f'timestamp_{camera}'].append([event.timestamp])
+            event_data[f'polarity_{camera}'].append([event.polarity])
+            event_data[f'xy_raw_{camera}'].append([event_xy_raw])
+            event_data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
 
         # get frames
-        for frame in frame_f:
+        for frame in frames:
             frame_image_raw = frame.image
             frame_image_undistorted = cv2.undistort(
                 frame_image_raw, mtx, dist, None, mtx)
 
-            data[f'timestamp_{camera}'].append([frame.timestamp])
-            data[f'image_raw_{camera}'].append([frame_image_raw])
-            data[f'image_undistorted_{camera}'].append([frame_image_undistorted])
+            frame_data[f'timestamp_{camera}'].append([frame.timestamp])
+            frame_data[f'image_raw_{camera}'].append([frame_image_raw])
+            frame_data[f'image_undistorted_{camera}'].append([frame_image_undistorted])
 
     event_file.close()
     frame_file.close()
@@ -536,7 +536,7 @@ def projection():
 
             input('stop the dv recording and hit enter')
 
-            aedat_file_name = os.listdir()[0]
+            aedat_file_name = f'{path_aedat}/{os.listdir(path_aedat)[0]}'
             for i in range(n_dv_cam):
                 get_dv(i, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i],
                        raw_event_file_name[i], raw_frame_file_name[i])
