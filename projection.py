@@ -164,6 +164,45 @@ def get_frame(camera, record_time, address, port, mtx, dist, f_name):
     return
 
 
+def get_dv(camera, aedat_file_name, mtx, dist,
+           event_file_name, frame_file_name):
+    event_file, event_data = create_event_file(event_file_name)
+    frame_file, frame_data = create_frame_file(frame_file_name)
+
+    with dv.AedatFile(aedat_file_name) as f:
+
+        if camera == 0:
+            events = f['events']
+            frames = f['frames']
+        else:
+            events = f[f'events_{camera}']
+            frames = f[f'frames_{camera}']
+
+        # get events
+        for event in event_f:
+            event_xy_raw = np.array([event.x, event.y], dtype='float64')
+            event_xy_undistorted = cv2.undistortPoints(
+                event_xy_raw, mtx, dist, None, mtx)[0, 0]
+
+            data[f'timestamp_{camera}'].append([event.timestamp])
+            data[f'polarity_{camera}'].append([event.polarity])
+            data[f'xy_raw_{camera}'].append([event_xy_raw])
+            data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
+
+        # get frames
+        for frame in frame_f:
+            frame_image_raw = frame.image
+            frame_image_undistorted = cv2.undistort(
+                frame_image_raw, mtx, dist, None, mtx)
+
+            data[f'timestamp_{camera}'].append([frame.timestamp])
+            data[f'image_raw_{camera}'].append([frame_image_raw])
+            data[f'image_undistorted_{camera}'].append([frame_image_undistorted])
+
+    event_file.close()
+    frame_file.close()
+
+
 def get_vicon(record_time, address, port, props_markers, f_name):
 
     from vicon_dssdk import ViconDataStream
@@ -343,6 +382,7 @@ def projection():
     path_camera = './camera_calibration'
     path_projection = './projection_calibration'
     path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
+    path_aedat = 'J:/dv_recording'
 
     vicon_record_time = 10  # in seconds
     dv_record_time = 60     # in seconds (set much higher)
@@ -362,6 +402,7 @@ def projection():
     dv_address = '127.0.0.1'
     dv_event_port = [36000, 36001]
     dv_frame_port = [36002, 36003]
+    dv_over_network = False
 
     dv_cam_height = [np.uint32(260) for i in range(n_dv_cam)]
     dv_cam_width = [np.uint32(346) for i in range(n_dv_cam)]
@@ -459,26 +500,46 @@ def projection():
         with open(f'{path_data}/info.json', 'w') as info_json_file:
             json.dump(info_json, info_json_file)
 
-        proc = []
-        for i in range(n_dv_cam):
-            proc.append(Process(target=get_event, args=(
-                i, dv_record_time, dv_address, dv_event_port[i],
-                dv_cam_mtx[i], dv_cam_dist[i], raw_event_file_name[i])))
-            proc.append(Process(target=get_frame, args=(
-                i, dv_record_time, dv_address, dv_frame_port[i],
-                dv_cam_mtx[i], dv_cam_dist[i], raw_frame_file_name[i])))
+        # DV data network
+        if dv_over_network:
+            print('give the wand signal')
 
-        proc.append(Process(target=get_vicon, args=(
-            vicon_record_time, vicon_address, vicon_port,
-            props_markers, raw_vicon_file_name)))
+            proc = []
+            for i in range(n_dv_cam):
+                proc.append(Process(target=get_event, args=(
+                    i, dv_record_time, dv_address, dv_event_port[i],
+                    dv_cam_mtx[i], dv_cam_dist[i], raw_event_file_name[i])))
+                proc.append(Process(target=get_frame, args=(
+                    i, dv_record_time, dv_address, dv_frame_port[i],
+                    dv_cam_mtx[i], dv_cam_dist[i], raw_frame_file_name[i])))
 
-        # start processes
-        for p in proc:
-            p.start()
+            proc.append(Process(target=get_vicon, args=(
+                vicon_record_time, vicon_address, vicon_port,
+                props_markers, raw_vicon_file_name)))
 
-        # wait for processes
-        for p in proc:
-            p.join()
+            # start processes
+            for p in proc:
+                p.start()
+
+            # wait for processes
+            for p in proc:
+                p.join()
+
+        else: # not dv_over_netwrok
+            for f in os.listdir(path_aedat):
+                os.remove(f'{path_aedat}/{f}')
+
+            print('start DV recording now and give the wand signal')
+
+            get_vicon(vicon_record_time, vicon_address, vicon_port,
+                      props_markers, raw_vicon_file_name)
+
+            input('stop the dv recording and hit enter')
+
+            aedat_file_name = os.listdir()[0]
+            for i in range(n_dv_cam):
+                get_dv(i, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i],
+                       raw_event_file_name[i], raw_frame_file_name[i])
 
         print('=== end recording ===')
 
