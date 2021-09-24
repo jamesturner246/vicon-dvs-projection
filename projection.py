@@ -532,7 +532,7 @@ def projection():
             print('start DV recording now and give the wand signal')
 
             get_vicon(vicon_record_time, vicon_address, vicon_port,
-                      prop_markers, raw_vicon_file_name)
+                      props_markers, raw_vicon_file_name)
 
             input('stop the dv recording and hit enter')
 
