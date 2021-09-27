@@ -98,7 +98,7 @@ def identify_wand_markers(dv):
     return dv
 
 
-def collect_vicon_data(address, port, prop_name, marker_names, n_frame, t_frame, debug):
+def get_vicon_data(address, port, prop_name, marker_names, n_frame, t_frame, debug):
 
     from vicon_dssdk import ViconDataStream
 
@@ -149,31 +149,26 @@ def process_vicon_data(marker_translation, debug):
     return coordinates
 
 
-def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
-                          n_frame=100, t_frame=0.001,
-                          reuse=False, debug=False,
-                          path='./calibration'):
+def get_vicon_coordinates(path, i_epoch, address, port, prop_name, marker_names,
+                          n_frame, t_frame, reuse=False, debug=False):
 
     print('get Vicon coordinates')
 
     marker_translation_file = f'{path}/vicon_marker_translation_{i_epoch}.npy'
-    coordinates_file = f'{path}/vicon_coordinates_{i_epoch}.npy'
 
     if reuse:
         marker_translation = np.load(marker_translation_file)
 
         coordinates = process_vicon_data(
             marker_translation, debug)
-        np.save(coordinates_file, coordinates)
 
     else:
-        marker_translation = collect_vicon_data(
+        marker_translation = get_vicon_data(
             address, port, prop_name, marker_names, n_frame, t_frame, debug)
         np.save(marker_translation_file, marker_translation)
 
         coordinates = process_vicon_data(
             marker_translation, debug)
-        np.save(coordinates_file, coordinates)
 
     # print Vicon coordinates
     for i in range(len(marker_names)):
@@ -182,7 +177,7 @@ def get_vicon_coordinates(i_epoch, address, port, prop_name, marker_names,
     return coordinates
 
 
-def collect_dv_data(address, event_port, n_event, debug):
+def get_dv_data(address, event_port, n_event, debug):
     event_xy = np.empty((n_event, 2), dtype='int32')
 
     with dv.NetworkEventInput(address=address, port=event_port) as f:
@@ -204,19 +199,19 @@ def collect_dv_data(address, event_port, n_event, debug):
     return event_xy
 
 
-def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dist, debug):
+def process_dv_data(event_xy, marker_count, cam_height, cam_width, cam_mtx, cam_dist, debug):
     erode_dv_kernel = np.ones((2, 2), 'uint8')
     dilate_dv_kernel = np.ones((10, 10), 'uint8')
 
-    event_image = np.zeros(camera_shape, dtype='int64')
+    event_image = np.zeros((cam_height, cam_width), dtype='int64')
     event_xy_masked = np.empty(event_xy.shape, dtype='int32')
 
     # accumulate events
     for xy in event_xy:
         xy_undistorted = cv2.undistortPoints(
-            xy.astype('float64'), camera_mtx, camera_dist, None, camera_mtx)[0, 0]
+            xy.astype('float64'), cam_mtx, cam_dist, None, cam_mtx)[0, 0]
         xy_int = np.rint(xy_undistorted).astype('int32')
-        xy_bounded = all(xy_int >= 0) and all(xy_int < camera_shape[::-1])
+        xy_bounded = all(xy_int >= 0) and all(xy_int < [cam_width, cam_height])
 
         if xy_bounded:
             event_image[xy_int[1], xy_int[0]] += 1.0
@@ -243,9 +238,9 @@ def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dis
     i_event = 0
     for xy in event_xy:
         xy_undistorted = cv2.undistortPoints(
-            xy.astype('float64'), camera_mtx, camera_dist, None, camera_mtx)[0, 0]
+            xy.astype('float64'), cam_mtx, cam_dist, None, cam_mtx)[0, 0]
         xy_int = np.rint(xy_undistorted).astype('int32')
-        xy_bounded = all(xy_int >= 0) and all(xy_int < camera_shape[::-1])
+        xy_bounded = all(xy_int >= 0) and all(xy_int < [cam_width, cam_height])
 
         if xy_bounded:
             if event_image_mask[xy_int[1], xy_int[0]] > 0:
@@ -278,7 +273,7 @@ def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dis
 
     if debug:
         coordinates_int = np.rint(coordinates).astype('int32')
-        coordinates_image = np.zeros(camera_shape, dtype='uint8')
+        coordinates_image = np.zeros((cam_height, cam_width), dtype='uint8')
         coordinates_image[coordinates_int[:, 1], coordinates_int[:, 0]] = 255
 
         # plot DV coordinates
@@ -291,39 +286,36 @@ def process_dv_data(event_xy, marker_count, camera_shape, camera_mtx, camera_dis
     return coordinates
 
 
-def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, marker_names,
-                       camera, camera_shape, camera_mtx, camera_dist, n_event=10000,
-                       path='./calibration', reuse=False, debug=False):
+def get_dv_coordinates(path, i_epoch, address, event_port, frame_port, prop_name, marker_names,
+                       n_event, camera, cam_height, cam_width, cam_mtx, cam_dist,
+                       reuse=False, debug=False):
 
     print(f'get DV {camera} coordinates')
 
     event_xy_file = f'{path}/dv_{camera}_event_xy_{i_epoch}.npy'
-    coordinates_file = f'{path}/dv_{camera}_coordinates_{i_epoch}.npy'
 
     if reuse:
         event_xy = np.load(event_xy_file)
 
         coordinates = process_dv_data(
-            event_xy, len(marker_names), camera_shape, camera_mtx, camera_dist, debug)
-        np.save(coordinates_file, coordinates)
+            event_xy, len(marker_names), cam_height, cam_width, cam_mtx, cam_dist, debug)
 
     else:
         done = False
         while not done:
-            event_xy = collect_dv_data(
+            event_xy = get_dv_data(
                 address, event_port, n_event, debug)
             np.save(event_xy_file, event_xy)
 
             coordinates = process_dv_data(
-                event_xy, len(marker_names), camera_shape, camera_mtx, camera_dist, debug)
-            np.save(coordinates_file, coordinates)
+                event_xy, len(marker_names), cam_height, cam_width, cam_mtx, cam_dist, debug)
 
             # plot coordinates
             with dv.NetworkFrameInput(address=address, port=frame_port) as f:
                 frame = next(f)
 
             frame_image = cv2.undistort(
-                frame.image, camera_mtx, camera_dist, None, camera_mtx)
+                frame.image, cam_mtx, cam_dist, None, cam_mtx)
 
             # plot markers
             fig, ax = plt.subplots()
@@ -335,8 +327,8 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
             ax.text(coordinates[3, 0], coordinates[3, 1], 'middle', color='blue')
             ax.text(coordinates[4, 0], coordinates[4, 1], 'bottom', color='blue')
             ax.set_title(f'camera {camera}')
-            ax.set_ylim([0, camera_shape[0]])
-            ax.set_xlim([0, camera_shape[1]])
+            ax.set_ylim([0, cam_height])
+            ax.set_xlim([0, cam_width])
             ax.invert_yaxis()
             plt.show()
 
@@ -357,61 +349,62 @@ def get_dv_coordinates(i_epoch, address, event_port, frame_port, prop_name, mark
     return coordinates
 
 
-def vicon_to_dv_method_1(v, m, origin_offset, nominal_focal_length, pixel_mm):
-    z = vicon_to_camera_centric_method_1(v, m)
-    z[:2] *= (1 / z[2])
-    z = z[:2]
-    z *= nominal_focal_length
-    z /= pixel_mm       # millimetres per pixel
-    z += origin_offset  # add the origin offset from image centre to top left corner explicitly
-    return z
+def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
+    error = 0.0
+    for v, d in zip(vicon_p, dv_p):
+        output = vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm)
+        difference = output - d
+        error += np.dot(difference, difference)
+
+    return np.sqrt(error)
 
 
-def vicon_to_camera_centric_method_1(v, m):
-    M = np.reshape(m[:9], (3, 3))
-    z = np.dot(v, M)    # apply the rotation to get into the camera orientation frame
-    z += m[9:12] * 10   # add the translation (using cm for a better scale of fitting)
-    return z
-
-
-def vicon_to_dv_method_2(v, m, origin_offset, nominal_focal_length, pixel_mm):
+def vicon_to_dv(v, m, origin_x_offset, origin_y_offset, nominal_focal_length, pixel_mm):
     focal_length = nominal_focal_length * m[6]
-    z = vicon_to_camera_centric_method_2(v, m)
+    z = vicon_to_camera_centric(v, m)
     z[:2] *= (1 / z[2])
     z = z[:2]
     z *= focal_length
-    z /= pixel_mm       # millimetres per pixel
-    z[0] *= m[7]        # allow for some rescaling of x due to the camera undistortion method
-    z += origin_offset  # add the origin offset from image centre to top left corner explicitly
+    z /= pixel_mm
+    # allow for some rescaling of x due to the camera undistortion method
+    z[0] *= m[7]
+    # add the origin offset from image centre to top left corner explicitly
+    z += [origin_x_offset, origin_y_offset]
     return z
 
 
-def vicon_to_camera_centric_method_2(v, m):
-    M = euler_angles_to_rotation_matrix(m)
-    z = np.dot(v, M)    # apply the rotation to get into the camera orientation frame
+def vicon_to_camera_centric(v, m):
+    M = euler_angles_to_rotation_matrix(m[0:3])
+    z = np.dot(M, v)    # apply the rotation to get into the camera orientation frame
     z += m[3:6] * 10    # add the translation (using cm for a better scale of fitting)
     return z
 
 
 """
-We use a convention where vectors as row vectors and matrices are multipied from the right.
-As for Euler angles we use the z1 -> x′ -> z2″ convention corresponding to the product
+For Euler angles we use the z1 -> x′ -> z2″ convention corresponding to the product
 Z(m[0])*X(m[1])*Z(m[2])
-"""  
+"""
 
 def euler_angles_to_rotation_matrix(m):
+
     M = np.array([
-        [ np.cos(m[0]), np.sin(m[0]), 0],
-        [-np.sin(m[0]), np.cos(m[0]), 0],
-        [ 0,            0,            1]])
-    M = np.dot(M, np.array([
-        [1,             0,            0],
-        [0,  np.cos(m[1]), np.sin(m[1])],
-        [0, -np.sin(m[1]), np.cos(m[1])]]))
-    M = np.dot(M, np.array([
-        [ np.cos(m[2]), np.sin(m[2]), 0],
-        [-np.sin(m[2]), np.cos(m[2]), 0],
-        [ 0,            0,            1]]))
+        [  np.cos(m[0]), -np.sin(m[0]),  0            ],
+        [  np.sin(m[0]),  np.cos(m[0]),  0            ],
+        [  0,             0,             1            ],
+    ])
+
+    M = np.dot(np.array([
+        [  1,             0,             0            ],
+        [  0,             np.cos(m[1]), -np.sin(m[1]) ],
+        [  0,             np.sin(m[1]),  np.cos(m[1]) ],
+    ]), M)
+
+    M = np.dot(np.array([
+        [  np.cos(m[2]), -np.sin(m[2]),  0            ],
+        [  np.sin(m[2]),  np.cos(m[2]),  0            ],
+        [  0,             0,             1            ],
+    ]), M)
+
     return M
 
 
@@ -423,8 +416,9 @@ m[2] (gamma) in [-pi, pi]
 """
 
 def rotation_matrix_to_euler_angles(M):
+    M = M.T
     tolerance= 1e-10
-    m= np.empty(3)   
+    m= np.empty(3)
     m[0]= np.arctan(M[0,2]/M[1,2])
     m[1]= np.arccos(M[2,2])
     m[2]= np.arctan(-M[2,0]/M[2,1])
@@ -446,31 +440,34 @@ def rotation_matrix_to_euler_angles(M):
 
 """
 Vicon Euler angles appear to be Tait-Bryan angles:
-m[0] - rotation around x axis in [-pi, pi]
+m[0] - rotation around z axis in [-pi, pi] 
 m[1] - rotation around (new) y axis [-pi/2, pi/2]
-m[2] - rotation around (new) z axis [-pi, pi]
-positive angles are counter-clockwise if looking towards the origin
+m[2] - rotation around (new) x axis [-pi, pi]
+positive angles are counter-clockwise if looking from positive values towards the origin
 """
 
 def tait_bryan_angles_to_rotation_matrix(m):
 
     M= np.array([
-        [  1,             0,             0             ],
-        [  0,             np.cos(m[0]), -np.sin(m[0])  ],
-        [  0,             np.sin(m[0]),  np.cos(m[0])  ]])
-
-    M= np.dot(M, np.array([
-        [  np.cos(m[1]),  0,             np.sin(m[1])  ],
-        [  0,             1,             0             ],
-        [ -np.sin(m[1]),  0,             np.cos(m[1])  ]]))
-
-    M= np.dot(M, np.array([
         [  np.cos(m[2]), -np.sin(m[2]),  0             ],
         [  np.sin(m[2]),  np.cos(m[2]),  0             ],
-        [  0,             0,             1             ]]))
+        [  0,             0,             1             ],
+    ])
+
+    M= np.dot(np.array([
+        [  np.cos(m[1]),  0,             np.sin(m[1])  ],
+        [  0,             1,             0             ],
+        [ -np.sin(m[1]),  0,             np.cos(m[1])  ],
+    ]), M)
+
+    M= np.dot(np.array([
+        [  1,             0,             0             ],
+        [  0,             np.cos(m[0]), -np.sin(m[0])  ],
+        [  0,             np.sin(m[0]),  np.cos(m[0])  ],
+    ]), M)
 
     return M
-        
+
 def rotation_matrix_to_tait_bryan_angles(M):
     tolerance= 1e-10
     m= np.empty(3)   
@@ -493,21 +490,9 @@ def rotation_matrix_to_tait_bryan_angles(M):
     return m
 
 
-def err_fun(m, vicon_p, dv_p, vicon_to_dv, origin_offset, nominal_focal_length, pixel_mm):
-    error = 0.0
-    for v, d in zip(vicon_p, dv_p):
-        output = vicon_to_dv(v, m, origin_offset, nominal_focal_length, pixel_mm)
-        difference = output - d
-        error += np.dot(difference, difference)
-
-    return np.sqrt(error)
-
-
 def calibrate():
 
     n_epoch = 20
-
-    calibrate_projection_method = 2
 
     reuse = True
     debug = False
@@ -515,12 +500,9 @@ def calibrate():
 
     path_camera = './camera_calibration'
     path_projection = './projection_calibration'
-    path = './calibration'
 
     # make calibration directories
     os.makedirs(path_projection, exist_ok=True)
-    if not reuse:
-        os.makedirs(path, exist_ok=True)
 
     prop_name = 'jt_wand'
     marker_names = [
@@ -532,9 +514,9 @@ def calibrate():
     ]
     n_marker = len(marker_names)
 
-    dv_n_event = 10000
     vicon_n_frame = 100
     vicon_t_frame = 0.001
+    dv_n_event = 10000
 
     # servers
     vicon_address, vicon_port = '127.0.0.1', 801
@@ -543,14 +525,16 @@ def calibrate():
     dv_frame_port = [36002, 36003]
 
     # DV camera
-    dv_camera_shape = [np.array([260, 346]) for i in range(2)]
-    dv_camera_mtx_file_name = [f'{path_camera}/camera_{i}_matrix.npy' for i in range(2)]
-    dv_camera_mtx = [np.load(file_name) for file_name in dv_camera_mtx_file_name]
-    dv_camera_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
-    dv_camera_dist = [np.load(file_name) for file_name in dv_camera_dist_file_name]
-    dv_camera_origin_offset = [dv_camera_shape[i][::-1] / 2 for i in range(2)]
-    dv_camera_nominal_focal_length = [4.0 for i in range(2)]
-    dv_camera_pixel_mm = [1.8e-2 for i in range(2)]
+    dv_cam_height = [np.uint32(260) for i in range(2)]
+    dv_cam_width = [np.uint32(346) for i in range(2)]
+    dv_cam_mtx_file_name = [f'{path_camera}/camera_{i}_matrix.npy' for i in range(2)]
+    dv_cam_mtx = [np.load(file_name) for file_name in dv_cam_mtx_file_name]
+    dv_cam_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
+    dv_cam_dist = [np.load(file_name) for file_name in dv_cam_dist_file_name]
+    dv_cam_origin_x_offset = [dv_cam_width[i] / 2 for i in range(2)]
+    dv_cam_origin_y_offset = [dv_cam_height[i] / 2 for i in range(2)]
+    dv_cam_nominal_focal_length = [4.0 for i in range(2)]
+    dv_cam_pixel_mm = [1.8e-2 for i in range(2)]
 
     # allocate temp memory
     vicon_wand_coordinates = np.empty((n_epoch, n_marker, 3), dtype='float64')
@@ -563,15 +547,14 @@ def calibrate():
             input('relocate prop and press enter...')
 
         vicon_wand_coordinates[i_epoch, :, :] = get_vicon_coordinates(
-            i_epoch, vicon_address, vicon_port, prop_name, marker_names,
-            n_frame=vicon_n_frame, t_frame=vicon_t_frame,
-            reuse=reuse, debug=debug, path=path)
+            path_projection, i_epoch, vicon_address, vicon_port, prop_name, marker_names,
+            vicon_n_frame, vicon_t_frame, reuse=reuse, debug=debug)
 
         for i in range(2):
             dv_wand_coordinates[i][i_epoch, :, :] = get_dv_coordinates(
-                i_epoch, dv_address, dv_event_port[i], dv_frame_port[i], prop_name, marker_names,
-                i, dv_camera_shape[i], dv_camera_mtx[i], dv_camera_dist[i], n_event=dv_n_event,
-                path=path, reuse=reuse, debug=debug)
+                path_projection, i_epoch, dv_address, dv_event_port[i], dv_frame_port[i], prop_name, marker_names,
+                dv_n_event, i, dv_cam_height[i], dv_cam_width[i], dv_cam_mtx[i], dv_cam_dist[i],
+                reuse=reuse, debug=debug)
 
         if not reuse:
             while True:
@@ -589,92 +572,71 @@ def calibrate():
 
     #########################################################################
 
-    if calibrate_projection_method == 1:
-        vicon_to_dv = vicon_to_dv_method_1
+    # the meaning of m is as follows:
+    # 0-2 Euler angles of transform into camera oriented space
+    # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
+    # 6 scaling factor to scale focal length to real focal length
+    # 7 scale factor for stretch in x-direction due to camera calibration/undistortion
 
-        # Vicon to DV transformation
-        m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
-        m = [np.load('./bootstrap_calibration/bootstrap_dv_space_transform.npy') for i in range(2)]
-        x = np.vstack(vicon_wand_coordinates)
-        y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
+    # Vicon to DV transformation
+    m = [np.empty(8) for i in range(2)]
+    for i in range(2):
+        # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
+        m[i][:3] = [3.14, 1.6, 0.0]
+        # initial guess for translation from pinhole to vicon origin (in cm)
+        m[i][3:6] = [22.0, 93.0, 231.0]
+        # initial guess for the deviation of focal length and x-stretching from camera undistortion
+        m[i][6:8] = [1.0, 1.0]
+    x = np.vstack(vicon_wand_coordinates)
+    y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
 
-        method = 'nelder-mead'
-        options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
+    method = 'nelder-mead'
+    options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
-        for i in range(2):
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: original guess has error: {err}')
+    for i in range(2):
+        err = err_fun(m[i], x, y[i], vicon_to_dv,
+                      dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i],
+                      dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
+        print(f'camera {i} transform: original guess has error: {err}')
 
-            result = minimize(err_fun, m[i], method=method, options=options,
-                              args=(x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                                    dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i]))
-            m[i] = result['x']
+        result = minimize(err_fun, m[i], method=method, options=options,
+                          args=(x, y[i], vicon_to_dv,
+                                dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i],
+                                dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i]))
+        m[i] = result['x']
 
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: final result has error: {err}')
+        err = err_fun(m[i], x, y[i], vicon_to_dv,
+                      dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i],
+                      dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
+        print(f'camera {i} transform: final result has error: {err}')
 
-            np.save(m_file[i], m[i])
 
-            print('DV space coefficients')
-            print(np.reshape(m[i][:9], (3, 3)))
-            print('DV space constants')
-            print(m[i][9:12])
-            print()
+        # save transform
+        v_to_dv_rotation_file = f'{path_projection}/v_to_dv_{i}_rotation.npy'
+        v_to_dv_rotation = euler_angles_to_rotation_matrix(m[i][0:3])
+        np.save(v_to_dv_rotation_file, v_to_dv_rotation)
 
-    #########################################################################
+        v_to_dv_translation_file = f'{path_projection}/v_to_dv_{i}_translation.npy'
+        v_to_dv_translation = m[i][3:6, np.newaxis] * 10 # convert from cm to mm
+        np.save(v_to_dv_translation_file, v_to_dv_translation)
 
-    elif calibrate_projection_method == 2:
-        vicon_to_dv = vicon_to_dv_method_2
+        v_to_dv_f_len_scale_file = f'{path_projection}/v_to_dv_{i}_focal_length_scale.npy'
+        v_to_dv_f_len_scale = m[i][6]
+        np.save(v_to_dv_f_len_scale_file, v_to_dv_f_len_scale)
 
-        # the meaning of m is as follows:
-        # 0-2 Euler angles of transform into camera oriented space
-        # 3-5 translation of vector to be relative to camera origin (chosen as pinhole position)
-        # 6 scale factor for stretch in x-direction due to camera calibration/undistortion
+        v_to_dv_x_scale_file = f'{path_projection}/v_to_dv_{i}_x_scale.npy'
+        v_to_dv_x_scale = m[i][7]
+        np.save(v_to_dv_x_scale_file, v_to_dv_x_scale)
 
-        # Vicon to DV transformation
-        m_file = [f'{path_projection}/dv_{i}_space_transform.npy' for i in range(2)]
-        m = [np.empty(8) for i in range(2)]
-        for i in range(2):
-            # initial guess for angles - turn x to -x and rotate around x to get z pointing in -z direction
-            m[i][:3] = [3.14, 1.6, 0.0]
-            # initial guess for translation from pinhole to vicon origin (in cm)
-            m[i][3:6] = [22.0, 93.0, 231.0]
-            # initial guess for the deviation of focal length and x-stretching from camera undistortion
-            m[i][6:8] = [1.0, 1.0]
-        x = np.vstack(vicon_wand_coordinates)
-        y = [np.vstack(coordinates) for coordinates in dv_wand_coordinates]
-
-        method = 'nelder-mead'
-        options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
-
-        for i in range(2):
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: original guess has error: {err}')
-
-            result = minimize(err_fun, m[i], method=method, options=options,
-                              args=(x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                                    dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i]))
-            m[i] = result['x']
-
-            err = err_fun(m[i], x, y[i], vicon_to_dv, dv_camera_origin_offset[i],
-                          dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
-            print(f'camera {i} transform: final result has error: {err}')
-
-            np.save(m_file[i], m[i])
-
-            print("Euler angles: {}".format(m[i][:3]))
-            print("Translation: {}".format(m[i][3:6]))
-            print("focal length and x rescales: {}".format(m[i][6:]))
-            print("The matrix: {}".format(euler_angles_to_rotation_matrix(m[i])))
-            print()
-
-    #########################################################################
-
-    else:
-        raise RuntimeError('invalid projection calibration method')
+        print('rotation:')
+        print(v_to_dv_rotation)
+        print('translation:')
+        print(v_to_dv_translation)
+        print('focal length scale:')
+        print(v_to_dv_f_len_scale)
+        print('x axis scale:')
+        print(v_to_dv_x_scale)
+        print()
 
     #########################################################################
 
@@ -685,8 +647,9 @@ def calibrate():
             plt.scatter(y[i][5*j : 5*(j+1), 0], y[i][5*j : 5*(j+1), 1])
         z = np.zeros(y[i].shape)
         for j in range(x.shape[0]):
-            z[j, :] = vicon_to_dv(x[j, :], m[i], dv_camera_origin_offset[i],
-                                  dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
+            z[j, :] = vicon_to_dv(x[j, :], m[i],
+                                  dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i],
+                                  dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
         for j in range(z.shape[0] // 5):
             plt.scatter(z[5*j : 5*(j+1), 0], z[5*j : 5*(j+1), 1], marker='x')
         ax = np.array([[[ 0, 0, 0], [1000, 0, 0]],
@@ -695,8 +658,9 @@ def calibrate():
         ax2 = np.empty((3, 2, 2))
         for j in range(3):
             for k in range(2):
-                ax2[j, k, :] = vicon_to_dv(ax[j, k, :], m[i], dv_camera_origin_offset[i],
-                                           dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
+                ax2[j, k, :] = vicon_to_dv(ax[j, k, :], m[i],
+                                           dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i],
+                                           dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
         for j in range(3):
             plt.plot(ax2[j, :, 0].flatten(), ax2[j, :, 1].flatten())
         plt.xlim([0, 346])
@@ -714,7 +678,7 @@ def calibrate():
         vicon_client.Connect(f'{vicon_address}:{vicon_port}')
         vicon_client.EnableMarkerData()
 
-        frame_image = [np.empty(np.hstack((dv_camera_shape[i], [3])), dtype='uint8') for i in range(2)]
+        frame_image = [np.empty((dv_cam_height[i], dv_cam_width[i], 3), dtype='uint8') for i in range(2)]
 
         with contextlib.ExitStack() as stack:
             frame_servers = [stack.enter_context(dv.NetworkFrameInput(
@@ -725,7 +689,7 @@ def calibrate():
 
                 for i in range(2):
                     frame_image[i][:, :, :] = cv2.undistort(
-                        dv_frame[i].image, dv_camera_mtx[i], dv_camera_dist[i], None, dv_camera_mtx[i])
+                        dv_frame[i].image, dv_cam_mtx[i], dv_cam_dist[i], None, dv_cam_mtx[i])
 
                 if not vicon_client.GetFrame():
                     continue
@@ -752,8 +716,9 @@ def calibrate():
 
                             # transform from Vicon space to DV camera space
                             for i in range(2):
-                                xy = vicon_to_dv(translation, m[i], dv_camera_origin_offset[i],
-                                                 dv_camera_nominal_focal_length[i], dv_camera_pixel_mm[i])
+                                xy = vicon_to_dv(translation, m[i],
+                                                 dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i],
+                                                 dv_cam_nominal_focal_length[i], dv_cam_pixel_mm[i])
                                 xy_int = np.rint(xy).astype('int32')
                                 cv2.circle(frame_image[i], (xy_int[0], xy_int[1]), 3, (0, 255, 0), -1)
 
