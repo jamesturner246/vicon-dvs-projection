@@ -221,7 +221,7 @@ def get_vicon(record_time, address, port, props_markers, f_name):
             continue
 
         try:
-            prop_quality = client.GetObjectQuality('jt_wand')
+            prop_quality = client.GetObjectQuality('jpt_wand')
         except ViconDataStream.DataStreamException:
             prop_quality = None
 
@@ -379,6 +379,7 @@ def projection():
     date = 20210924
     initials = 'jt'
 
+    path_props = './props'
     path_camera = './camera_calibration'
     path_projection = './projection_calibration'
     path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
@@ -411,33 +412,29 @@ def projection():
     dv_cam_nominal_f_len = [4.0 for i in range(n_dv_cam)]
     dv_cam_pixel_mm = [1.8e-2 for i in range(n_dv_cam)]
 
+    # comment out as required
+    prop_names = [
+        #'jpt_mallet',
+        'jpt_screwdriver',
+        #'kth_hammer',
+        #'kth_screwdriver',
+        #'kth_spanner',
+    ]
+
     # props_markers:      contains the translation of each marker, relative to prop origin
     # props_translation:  contains the translation of the root segment (mean marker translation)
     # props_mesh:         contains prop STL meshes (polygon, translation, vertex)
-
     props_markers = {}
     props_translation = {}
     props_mesh = {}
 
-    # screwdriver mesh marker coordinates
-    props_markers['jt_screwdriver'] = {
-        'handle_1':    [ 0.0,  78.0,   13.5 ],
-        'handle_2':    [ 0.0,  78.0,  -13.5 ],
-        'shaft_base':  [ 5.0,  120.0,  0.0  ],
-        'shaft_tip':   [-5.0,  164.0,  0.0  ],
-    }
-    props_translation['jt_screwdriver'] = np.mean(list(props_markers['jt_screwdriver'].values()), 0).T
-    props_mesh['jt_screwdriver'] = stl.mesh.Mesh.from_file('./props/screwdriver.stl').vectors.transpose(0, 2, 1)
-
-    # # mallet mesh marker coordinates
-    # props_markers['jt_mallet'] = {
-    #     'shaft_base':  [ 0.0,   9.0,  164.0 ],
-    #     'shaft_tip':   [ 0.0,  -9.0,  214.0 ],
-    #     'head_1':      [-40.0,  0.0,  276.5 ],
-    #     'head_2':      [ 40.0,  0.0,  276.5 ],
-    # }
-    # props_translation['jt_mallet'] = np.mean(list(props_markers['jt_mallet'].values()), 0).T
-    # props_mesh['jt_mallet'] = stl.mesh.Mesh.from_file('./props/mallet.stl').vectors.transpose(0, 2, 1)
+    for prop_name in prop_names:
+        with open(f'{path_props}/{prop_name}_markers.json', 'r') as marker_file:
+            props_markers[prop_name] = json.load(marker_file)
+        translation = np.mean(list(props_markers[prop_name].values()), 0).T
+        props_translation[prop_name] = translation
+        mesh = stl.mesh.Mesh.from_file('{path_props}/{prop_name}_mesh.stl').vectors.transpose(0, 2, 1)
+        props_mesh[prop_name] = mesh
 
 
 
