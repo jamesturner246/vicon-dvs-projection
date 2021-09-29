@@ -16,7 +16,7 @@ import dv
 
 from calibrate_projection import euler_angles_to_rotation_matrix
 
-n_dv_cam = 1
+n_dv_cam = 2
 
 
 def create_event_file(f_name):
@@ -376,8 +376,8 @@ def projection():
     test_number = 0
 
     date = time.strftime('%Y%m%d')
-    date = 20210924
-    initials = 'jt'
+    #date = 20210924
+    initials = 'jpt'
 
     path_props = './props'
     path_camera = './camera_calibration'
@@ -433,7 +433,7 @@ def projection():
             props_markers[prop_name] = json.load(marker_file)
         translation = np.mean(list(props_markers[prop_name].values()), 0).T
         props_translation[prop_name] = translation
-        mesh = stl.mesh.Mesh.from_file('{path_props}/{prop_name}_mesh.stl').vectors.transpose(0, 2, 1)
+        mesh = stl.mesh.Mesh.from_file(f'{path_props}/{prop_name}_mesh.stl').vectors.transpose(0, 2, 1)
         props_mesh[prop_name] = mesh
 
 
@@ -1020,18 +1020,16 @@ def projection():
         for prop_name in props_markers.keys():
             #print(f'DEBUG: extrapolated {prop_name}:', vicon['extrapolated'][prop_name])
 
-            # transform to Vicon space
-            v0_to_v_rotation = vicon['vicon_rotation'][prop_name]
-            v0_to_v_translation = vicon['vicon_translation'][prop_name]
-
-            if not np.isfinite(v0_to_v_rotation).all() or not np.isfinite(v0_to_v_translation).all():
-                prop_masks[i][prop_name].fill(0)
-                continue
-
             # transform to DV camera space
             for i in range(n_dv_cam):
-                dv_space_p = np.matmul(vicon[f'camera_{i}_rotation'][prop_name], props_mesh[prop_name])
-                dv_space_p += vicon[f'camera_{i}_translation'][prop_name]
+                mesh_to_dv_rotation = vicon[f'camera_{i}_rotation'][prop_name]
+                mesh_to_dv_translation = vicon[f'camera_{i}_translation'][prop_name]
+
+                if not np.isfinite(mesh_to_dv_rotation).all() or not np.isfinite(mesh_to_dv_translation).all():
+                    prop_masks[i][prop_name].fill(0)
+                    continue
+
+                dv_space_p = np.matmul(mesh_to_dv_rotation, props_mesh[prop_name]) + mesh_to_dv_translation
                 dv_space_p[:, :2, :] *= (1 / dv_space_p[:, np.newaxis, 2, :])
                 dv_space_p = dv_space_p[:, :2, :]
                 dv_space_p *= v_to_dv_f_len[i]
