@@ -504,7 +504,7 @@ def calibrate():
     # make calibration directories
     os.makedirs(path_projection, exist_ok=True)
 
-    prop_name = 'jt_wand'
+    prop_name = 'jpt_wand'
     marker_names = [
         'top_left',
         'top_centre',
