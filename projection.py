@@ -372,11 +372,11 @@ def get_next_vicon(vicon_iter):
 def projection():
 
     record = False
-    test_scenario = 'no_human'
+    test_scenario = 'floating_kth_hammer'
     test_number = 0
 
     date = time.strftime('%Y%m%d')
-    #date = 20210924
+    #date = 20210929
     initials = 'jpt'
 
     path_props = './props'
@@ -385,7 +385,7 @@ def projection():
     path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
     path_aedat = 'J:/dv_recording'
 
-    vicon_record_time = 10  # in seconds
+    vicon_record_time = 30  # in seconds
     dv_record_time = 60     # in seconds (set much higher)
 
     event_distinguish_polarity = False
@@ -396,7 +396,7 @@ def projection():
     vicon_bad_frame_timeout = 100
     vicon_buffer_length = 300
 
-    prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
+    prop_mask_dilation_kernel = np.ones((4, 4), 'uint8')
 
     # servers
     vicon_address, vicon_port = '127.0.0.1', 801
@@ -414,11 +414,11 @@ def projection():
 
     # comment out as required
     prop_names = [
-        #'jpt_mallet',
-        'jpt_screwdriver',
-        #'kth_hammer',
+        'kth_hammer',
         #'kth_screwdriver',
         #'kth_spanner',
+        #'jpt_mallet',
+        #'jpt_screwdriver',
     ]
 
     # props_markers:      contains the translation of each marker, relative to prop origin
@@ -493,7 +493,13 @@ def projection():
         info_json = {
             'start_time': datetime.now().timestamp(),
             'camera_calibration_path': path_camera,
-            'projection_calibration_path': path_projection}
+            'projection_calibration_path': path_projection,
+            'props_markers': {},
+            'props_mesh': {},
+        }
+        for prop_name in prop_names:
+            info_json['props_markers'][prop_name] = f'{path_props}/{prop_name}_markers.json'
+            info_json['props_mesh'][prop_name] = f'{path_props}/{prop_name}_mesh.stl'
         with open(f'{path_data}/info.json', 'w') as info_json_file:
             json.dump(info_json, info_json_file)
 
@@ -576,7 +582,7 @@ def projection():
 
         return error
 
-    for prop_name in props_markers.keys():
+    for prop_name in prop_names:
         mesh_markers = []
         vicon_markers = []
         v0_to_v_rotations = []
@@ -634,7 +640,7 @@ def projection():
     raw_vicon_iter['vicon_rotation'] = {}
     raw_vicon_iter['vicon_translation'] = {}
     raw_vicon_iter['vicon_markers'] = {}
-    for prop_name in props_markers.keys():
+    for prop_name in prop_names:
         rotation = raw_vicon_file.root.props[prop_name].vicon_rotation
         raw_vicon_iter['vicon_rotation'][prop_name] = rotation.iterrows()
         translation = raw_vicon_file.root.props[prop_name].vicon_translation
@@ -649,7 +655,7 @@ def projection():
     vicon_rotation_buffer = {}
     vicon_translation_buffer = {}
     vicon_markers_buffer = {}
-    for prop_name in props_markers.keys():
+    for prop_name in prop_names:
         vicon_timestamp_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_translation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
@@ -660,7 +666,7 @@ def projection():
     vicon = get_next_vicon(raw_vicon_iter)
 
     # append to good Vicon frame buffers
-    for prop_name in props_markers.keys():
+    for prop_name in prop_names:
         timestamp = vicon['timestamp']
         vicon_timestamp_buffer[prop_name].append(timestamp)
         rotation = vicon['vicon_rotation'][prop_name]
@@ -684,7 +690,7 @@ def projection():
         final_vicon_data['timestamp'].append([vicon['timestamp']])
 
         # for each prop
-        for prop_name in props_markers.keys():
+        for prop_name in prop_names:
             final_vicon_data['extrapolated'][prop_name].append([False])
 
             v0_to_v_rotation = vicon['vicon_rotation'][prop_name]
@@ -832,8 +838,8 @@ def projection():
     frame_image = [np.zeros((dv_cam_height[i], dv_cam_width[i], 3), dtype='uint8') for i in range(n_dv_cam)]
     frame_label = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='int8') for i in range(n_dv_cam)]
     frame_label_depth = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='float64') for i in range(n_dv_cam)]
-    prop_masks = [{marker_name: np.empty((dv_cam_height[i], dv_cam_width[i]), dtype='uint8')
-                   for marker_name in props_markers.keys()} for i in range(n_dv_cam)]
+    prop_masks = [{prop_name: np.empty((dv_cam_height[i], dv_cam_width[i]), dtype='uint8')
+                   for prop_name in prop_names} for i in range(n_dv_cam)]
 
     # load raw DV event data
     raw_event_file = []
@@ -879,7 +885,7 @@ def projection():
 
     final_vicon_iter['vicon_markers'] = {}
 
-    for prop_name in props_markers.keys():
+    for prop_name in prop_names:
         extrapolated = final_vicon_file.root.props[prop_name].extrapolated
         final_vicon_iter['extrapolated'][prop_name] = extrapolated.iterrows()
 
@@ -1017,7 +1023,7 @@ def projection():
         print()
         print('Vicon frame timestamp: ', vicon['timestamp'])
 
-        for prop_name in props_markers.keys():
+        for prop_name in prop_names:
             #print(f'DEBUG: extrapolated {prop_name}:', vicon['extrapolated'][prop_name])
 
             # transform to DV camera space
@@ -1060,7 +1066,7 @@ def projection():
 
                     # mask DV frame image
                     image[:] = frame[i][f'image_undistorted_{i}']
-                    for prop_name in props_markers.keys():
+                    for prop_name in prop_names:
                         mask = prop_masks[i][prop_name].astype('bool')
                         image[mask, :] = blue
 
@@ -1166,7 +1172,7 @@ def projection():
 
 
                 # fill DV event image with events, then mask it
-                for prop_name in props_markers.keys():
+                for prop_name in prop_names:
                     mask = prop_masks[i][prop_name].astype('bool')
                     image[mask] = grey # show prop mask?
                     if event_distinguish_polarity:
