@@ -924,9 +924,8 @@ def projection():
 
 
     # manually find first DV event and frame
-    event_start_timestamp = [None for i in range(n_dv_cam)]
+    dv_start_timestamp = [None for i in range(n_dv_cam)]
     event = [None for i in range(n_dv_cam)]
-    frame_start_timestamp = [None for i in range(n_dv_cam)]
     frame = [None for i in range(n_dv_cam)]
     for i in range(n_dv_cam):
         search_image = np.empty((dv_cam_height[i], dv_cam_width[i] * 2, 3), dtype='uint8')
@@ -993,13 +992,12 @@ def projection():
 
         print()
 
-        event_start_timestamp[i] = np.uint64(event_timestamp[i_event] + 3000000) # plus 3 seconds
-        frame_start_timestamp[i] = np.uint64(frame_timestamp[i_frame] + 3000000) # plus 3 seconds
+        dv_start_timestamp[i] = np.uint64(event_timestamp[i_event] + 3000000) # plus 3 seconds
         event[i] = get_next_event(i, raw_event_iter[i])
-        while event[i][f'timestamp_{i}'] < event_start_timestamp[i]:
+        while event[i][f'timestamp_{i}'] < dv_start_timestamp[i]:
             event[i] = get_next_event(i, raw_event_iter[i])
         frame[i] = get_next_frame(i, raw_frame_iter[i])
-        while frame[i][f'timestamp_{i}'] < frame_start_timestamp[i]:
+        while frame[i][f'timestamp_{i}'] < dv_start_timestamp[i]:
             frame[i] = get_next_frame(i, raw_frame_iter[i])
 
 
@@ -1058,7 +1056,7 @@ def projection():
         for i in range(n_dv_cam):
             if not done_frame[i]:
 
-                timestamp = frame[i][f'timestamp_{i}'] - frame_start_timestamp[i]
+                timestamp = frame[i][f'timestamp_{i}'] - dv_start_timestamp[i]
                 while timestamp <= vicon['timestamp']:
                     image = frame_image[i]
                     label = frame_label[i]
@@ -1104,7 +1102,7 @@ def projection():
                         done_frame[i] = True
                         break
 
-                    timestamp = frame[i][f'timestamp_{i}'] - frame_start_timestamp[i]
+                    timestamp = frame[i][f'timestamp_{i}'] - dv_start_timestamp[i]
 
 
 
@@ -1120,7 +1118,7 @@ def projection():
                 pos.fill(0)
                 neg.fill(0)
 
-                timestamp = event[i][f'timestamp_{i}'] - event_start_timestamp[i]
+                timestamp = event[i][f'timestamp_{i}'] - dv_start_timestamp[i]
                 while timestamp < vicon_midway:
 
                     # check DV event is in frame
@@ -1168,7 +1166,7 @@ def projection():
                         done_event[i] = True
                         break
 
-                    timestamp = event[i][f'timestamp_{i}'] - event_start_timestamp[i]
+                    timestamp = event[i][f'timestamp_{i}'] - dv_start_timestamp[i]
 
 
                 # fill DV event image with events, then mask it
