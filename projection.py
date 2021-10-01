@@ -372,17 +372,24 @@ def get_next_vicon(vicon_iter):
 def projection():
 
     record = False
+
+    test_initials = 'jpt'
     test_scenario = 'floating_kth_hammer'
     test_number = 0
 
-    date = time.strftime('%Y%m%d')
-    #date = 20210929
-    initials = 'jpt'
+    date_data = time.strftime('%Y%m%d')
+    #date_data = 20210929
+    path_data = f'./data/{date_data}_{test_initials}_{test_scenario}/{test_number:04}'
+
+    date_camera = time.strftime('%Y%m%d')
+    #date_camera = 20210922
+    path_camera = f'./camera_calibration/{date_camera}'
+
+    date_projection = time.strftime('%Y%m%d')
+    #date_projection = 20210922
+    path_projection = f'./projection_calibration/{date_projection}'
 
     path_props = './props'
-    path_camera = './camera_calibration'
-    path_projection = './projection_calibration'
-    path_data = f'./data/{date}_{initials}_{test_scenario}/{test_number:04}'
     path_aedat = 'J:/dv_recording'
 
     vicon_record_time = 30  # in seconds
