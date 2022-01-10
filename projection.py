@@ -2,9 +2,9 @@
 import os
 import json
 from collections import deque
-from datetime import datetime
 import time
 import pause
+from argparse import ArgumentParser
 from multiprocessing import Process
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
@@ -21,187 +21,6 @@ from poses import *
 
 
 n_cameras = 2
-
-
-def get_dvs_network_events(camera, record_time, address, port, mtx, dist, events_file_name):
-    events_file, data = create_pytables_events_file(events_file_name, n_cameras)
-
-    with dv.NetworkEventInput(address=address, port=port) as event_f:
-        event = next(event_f)
-        stop_timestamp = event.timestamp + int(record_time * 1000000)
-
-        for event in event_f:
-            if event.timestamp >= stop_timestamp:
-                break
-
-            # undistort event
-            event_xy_raw = np.array([event.x, event.y], dtype='float64')
-            event_xy_undistorted = cv2.undistortPoints(
-                event_xy_raw, mtx, dist, None, mtx)[0, 0]
-
-            data[f'timestamp_{camera}'].append([event.timestamp])
-            data[f'polarity_{camera}'].append([event.polarity])
-            data[f'xy_raw_{camera}'].append([event_xy_raw])
-            data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
-
-    events_file.close()
-    return
-
-
-def get_dvs_network_frames(camera, record_time, address, port, mtx, dist, frames_file_name):
-    frames_file, data = create_pytables_frames_file(frames_file_name, n_cameras)
-
-    with dv.NetworkFrameInput(address=address, port=port) as frame_f:
-        frame = next(frame_f)
-        stop_timestamp = frame.timestamp + int(record_time * 1000000)
-
-        for frame in frame_f:
-            if frame.timestamp >= stop_timestamp:
-                break
-
-            # undistort frame
-            frame_image_raw = frame.image
-            frame_image_undistorted = cv2.undistort(
-                frame_image_raw, mtx, dist, None, mtx)
-
-            data[f'timestamp_{camera}'].append([frame.timestamp])
-            data[f'image_raw_{camera}'].append([frame_image_raw])
-            data[f'image_undistorted_{camera}'].append([frame_image_undistorted])
-
-    frames_file.close()
-    return
-
-
-def get_dvs_aedat_file_events(camera, aedat_file_name, mtx, dist, events_file_name):
-    events_file, event_data = create_pytables_events_file(events_file_name, n_cameras)
-
-    with dv.AedatFile(aedat_file_name) as f:
-
-        if camera == 0:
-            events = f['events']#.numpy() # TODO: test numpy iterators
-        else:
-            events = f[f'events_{camera}']#.numpy() # TODO: test numpy iterators
-
-        # get events
-        for event in events:
-            event_xy_raw = np.array([event.x, event.y], dtype='float64')
-            event_xy_undistorted = cv2.undistortPoints(
-                event_xy_raw, mtx, dist, None, mtx)[0, 0]
-
-            event_data[f'timestamp_{camera}'].append([event.timestamp])
-            event_data[f'polarity_{camera}'].append([event.polarity])
-            event_data[f'xy_raw_{camera}'].append([event_xy_raw])
-            event_data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
-
-    events_file.close()
-
-
-def get_dvs_aedat_file_frames(camera, aedat_file_name, mtx, dist, frames_file_name):
-    frames_file, frame_data = create_pytables_frames_file(frames_file_name, n_cameras)
-
-    with dv.AedatFile(aedat_file_name) as f:
-
-        if camera == 0:
-            frames = f['frames']#.numpy() # TODO: test numpy iterators
-        else:
-            frames = f[f'frames_{camera}']#.numpy() # TODO: test numpy iterators
-
-        # get frames
-        for frame in frames:
-            frame_image_raw = frame.image
-            frame_image_undistorted = cv2.undistort(
-                frame_image_raw, mtx, dist, None, mtx)
-
-            frame_data[f'timestamp_{camera}'].append([frame.timestamp])
-            frame_data[f'image_raw_{camera}'].append([frame_image_raw])
-            frame_data[f'image_undistorted_{camera}'].append([frame_image_undistorted])
-
-    frames_file.close()
-
-
-def get_vicon_network_poses(record_time, address, port, props_markers, poses_file_name):
-
-    from vicon_dssdk import ViconDataStream
-
-    poses_file, data = create_pytables_poses_file(poses_file_name, n_cameras, props_markers)
-
-    client = ViconDataStream.Client()
-    client.Connect(f'{address}:{port}')
-    client.EnableMarkerData()
-    client.EnableSegmentData()
-
-    # wait for signal to begin recording
-    print('waiting for signal...')
-    while True:
-        if not client.GetFrame():
-            continue
-
-        try:
-            prop_quality = client.GetObjectQuality('jpt_wand')
-        except ViconDataStream.DataStreamException:
-            prop_quality = None
-
-        # if vicon wand signal is present
-        if prop_quality is not None:
-            break
-
-    # compute start and stop times
-    start_time = datetime.now().timestamp() + 3
-    stop_time = start_time + record_time
-
-    # wait until start time
-    start_timestamp = int(start_time * 1000000)
-    print(f'vicon start timestamp (usec): {start_timestamp:,}')
-    pause.until(start_time)
-
-    # begin frame collection
-    current_time = start_time
-    while current_time < stop_time:
-        current_time = datetime.now().timestamp()
-
-        if not client.GetFrame():
-            continue
-
-        timestamp = int((current_time - start_time) * 1000000)
-        data['timestamp'].append([timestamp])
-
-        prop_names = props_markers.keys()
-        for prop_name in prop_names:
-            marker_names = props_markers[prop_name].keys()
-
-            try:
-                prop_quality = client.GetObjectQuality(prop_name)
-            except ViconDataStream.DataStreamException:
-                prop_quality = None
-
-            if prop_quality is not None:
-                root_segment = client.GetSubjectRootSegmentName(prop_name)
-
-                rotation = np.array(client.GetSegmentGlobalRotationMatrix(prop_name, root_segment)[0])
-                data['vicon_rotation'][prop_name].append([rotation])
-
-                translation = np.array(client.GetSegmentGlobalTranslation(prop_name, root_segment)[0])
-                data['vicon_translation'][prop_name].append([translation[:, np.newaxis]])
-
-                for marker_name in marker_names:
-                    marker = np.array(client.GetMarkerGlobalTranslation(prop_name, marker_name)[0])
-                    data['vicon_markers'][prop_name][marker_name].append([marker[:, np.newaxis]])
-
-            else:
-                rotation = np.full((3, 3), np.nan, dtype='float64')
-                data['vicon_rotation'][prop_name].append([rotation])
-
-                translation = np.full(3, np.nan, dtype='float64')
-                data['vicon_translation'][prop_name].append([translation[:, np.newaxis]])
-
-                for marker_name in marker_names:
-                    marker = np.full(3, np.nan, dtype='float64')
-                    data['vicon_markers'][prop_name][marker_name].append([marker[:, np.newaxis]])
-
-    client.Disconnect()
-
-    poses_file.close()
-    return
 
 
 def get_next_event(camera, event_iter):
@@ -223,110 +42,85 @@ def get_next_frame(camera, frame_iter):
     return frame
 
 
-def get_next_vicon(vicon_iter):
-    vicon = {}
+def get_next_pose(poses_iter):
+    pose = {}
 
-    if 'timestamp' in vicon_iter:
-        vicon['timestamp'] = next(
-            vicon_iter['timestamp'])
+    if 'timestamp' in poses_iter:
+        pose['timestamp'] = next(
+            poses_iter['timestamp'])
 
-    if 'extrapolated' in vicon_iter:
-        vicon['extrapolated'] = {}
-        for prop_name in vicon_iter['extrapolated'].keys():
-            vicon['extrapolated'][prop_name] = next(
-                vicon_iter['extrapolated'][prop_name])
+    if 'extrapolated' in poses_iter:
+        pose['extrapolated'] = {}
+        for prop_name in poses_iter['extrapolated'].keys():
+            pose['extrapolated'][prop_name] = next(
+                poses_iter['extrapolated'][prop_name])
 
-    if 'vicon_rotation' in vicon_iter:
-        vicon['vicon_rotation'] = {}
-        for prop_name in vicon_iter['vicon_rotation'].keys():
-            vicon['vicon_rotation'][prop_name] = next(
-                vicon_iter['vicon_rotation'][prop_name])
+    if 'vicon_rotation' in poses_iter:
+        pose['vicon_rotation'] = {}
+        for prop_name in poses_iter['vicon_rotation'].keys():
+            pose['vicon_rotation'][prop_name] = next(
+                poses_iter['vicon_rotation'][prop_name])
 
-    if 'rotation' in vicon_iter:
-        vicon['rotation'] = {}
-        for prop_name in vicon_iter['rotation'].keys():
-            vicon['rotation'][prop_name] = next(
-                vicon_iter['rotation'][prop_name])
-
-    for i in range(n_cameras):
-        if f'camera_{i}_rotation' in vicon_iter:
-            vicon[f'camera_{i}_rotation'] = {}
-            for prop_name in vicon_iter[f'camera_{i}_rotation'].keys():
-                vicon[f'camera_{i}_rotation'][prop_name] = next(
-                    vicon_iter[f'camera_{i}_rotation'][prop_name])
-
-    if 'vicon_translation' in vicon_iter:
-        vicon['vicon_translation'] = {}
-        for prop_name in vicon_iter['vicon_translation'].keys():
-            vicon['vicon_translation'][prop_name] = next(
-                vicon_iter['vicon_translation'][prop_name])
-
-    if 'translation' in vicon_iter:
-        vicon['translation'] = {}
-        for prop_name in vicon_iter['translation'].keys():
-            vicon['translation'][prop_name] = next(
-                vicon_iter['translation'][prop_name])
+    if 'rotation' in poses_iter:
+        pose['rotation'] = {}
+        for prop_name in poses_iter['rotation'].keys():
+            pose['rotation'][prop_name] = next(
+                poses_iter['rotation'][prop_name])
 
     for i in range(n_cameras):
-        if f'camera_{i}_translation' in vicon_iter:
-            vicon[f'camera_{i}_translation'] = {}
-            for prop_name in vicon_iter[f'camera_{i}_translation'].keys():
-                vicon[f'camera_{i}_translation'][prop_name] = next(
-                    vicon_iter[f'camera_{i}_translation'][prop_name])
+        if f'camera_{i}_rotation' in poses_iter:
+            pose[f'camera_{i}_rotation'] = {}
+            for prop_name in poses_iter[f'camera_{i}_rotation'].keys():
+                pose[f'camera_{i}_rotation'][prop_name] = next(
+                    poses_iter[f'camera_{i}_rotation'][prop_name])
 
-    if 'vicon_markers' in vicon_iter:
-        vicon['vicon_markers'] = {}
-        for prop_name in vicon_iter['vicon_markers'].keys():
-            vicon['vicon_markers'][prop_name] = {}
-            for marker_name in vicon_iter['vicon_markers'][prop_name].keys():
-                vicon['vicon_markers'][prop_name][marker_name] = next(
-                    vicon_iter['vicon_markers'][prop_name][marker_name])
+    if 'vicon_translation' in poses_iter:
+        pose['vicon_translation'] = {}
+        for prop_name in poses_iter['vicon_translation'].keys():
+            pose['vicon_translation'][prop_name] = next(
+                poses_iter['vicon_translation'][prop_name])
 
-    return vicon
+    if 'translation' in poses_iter:
+        pose['translation'] = {}
+        for prop_name in poses_iter['translation'].keys():
+            pose['translation'][prop_name] = next(
+                poses_iter['translation'][prop_name])
+
+    for i in range(n_cameras):
+        if f'camera_{i}_translation' in poses_iter:
+            pose[f'camera_{i}_translation'] = {}
+            for prop_name in poses_iter[f'camera_{i}_translation'].keys():
+                pose[f'camera_{i}_translation'][prop_name] = next(
+                    poses_iter[f'camera_{i}_translation'][prop_name])
+
+    if 'vicon_markers' in poses_iter:
+        pose['vicon_markers'] = {}
+        for prop_name in poses_iter['vicon_markers'].keys():
+            pose['vicon_markers'][prop_name] = {}
+            for marker_name in poses_iter['vicon_markers'][prop_name].keys():
+                pose['vicon_markers'][prop_name][marker_name] = next(
+                    poses_iter['vicon_markers'][prop_name][marker_name])
+
+    return pose
 
 
-def projection():
+def projection(path_data):
 
-    record = False
+    if not os.path.exists(path_data):
+        raise ValueError('path does not exist')
 
-    test_initials = 'jpt'
-    test_scenario = 'floating_kth_hammer'
-    test_number = 0
-
-    date_data = time.strftime('%Y%m%d')
-    #date_data = 20210929
-    path_data = f'./data/{date_data}_{test_initials}_{test_scenario}/{test_number:04}'
-
-    date_camera = time.strftime('%Y%m%d')
-    #date_camera = 20210922
-    path_camera = f'./camera_calibration/{date_camera}'
-
-    date_projection = time.strftime('%Y%m%d')
-    #date_projection = 20210922
-    path_projection = f'./projection_calibration/{date_projection}'
-
-    path_props = './props'
-    path_aedat = 'J:/dv_recording'
-
-    vicon_record_time = 30  # in seconds
-    dv_record_time = 60     # in seconds (set much higher)
+    vicon_address, vicon_port = '127.0.0.1', 801
 
     event_distinguish_polarity = False
 
     #vicon_marker_error_threshold = np.inf    # millimeters
     vicon_marker_error_threshold = 30.0       # millimeters
 
-    vicon_bad_frame_timeout = 100
+    vicon_bad_pose_timeout = 100
     vicon_buffer_length = 300
 
     prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
 
-    # servers
-    vicon_address, vicon_port = '127.0.0.1', 801
-    dv_address = '127.0.0.1'
-    dv_event_port = [36000, 36001]
-    dv_frame_port = [36002, 36003]
-    dv_over_network = False
 
     dv_cam_height = [np.uint32(260) for i in range(n_cameras)]
     dv_cam_width = [np.uint32(346) for i in range(n_cameras)]
@@ -335,14 +129,14 @@ def projection():
     dv_cam_nominal_f_len = [4.0 for i in range(n_cameras)]
     dv_cam_pixel_mm = [1.8e-2 for i in range(n_cameras)]
 
-    # comment out as required
-    prop_names = [
-        'kth_hammer',
-        #'kth_screwdriver',
-        #'kth_spanner',
-        #'jpt_mallet',
-        #'jpt_screwdriver',
-    ]
+    # Read recording info from JSON
+    with open(f'{path_data}/info.json', 'r') as info_json_file:
+        info_json = json.load(info_json_file)
+
+
+    ##################################################################
+
+    # === READ PROPS DATA ===
 
     # props_markers:      contains the translation of each marker, relative to prop origin
     # props_translation:  contains the translation of the root segment (mean marker translation)
@@ -351,25 +145,22 @@ def projection():
     props_translation = {}
     props_mesh = {}
 
-    for prop_name in prop_names:
-        with open(f'{path_props}/{prop_name}_markers.json', 'r') as marker_file:
-            props_markers[prop_name] = json.load(marker_file)
-        translation = np.mean(list(props_markers[prop_name].values()), 0).T
+    props_name = list(info_json['prop_marker_files'].keys())
+    for prop_name in props_name:
+        with open(info_json['prop_marker_files'][prop_name], 'r') as marker_file:
+            markers = json.load(marker_file)
+        props_markers[prop_name] = markers
+        translation = np.mean(list(markers.values()), 0).T
         props_translation[prop_name] = translation
-        mesh = stl.mesh.Mesh.from_file(f'{path_props}/{prop_name}_mesh.stl').vectors.transpose(0, 2, 1)
+        mesh = stl.mesh.Mesh.from_file(info_json['prop_mesh_files'][prop_name]).vectors.transpose(0, 2, 1)
         props_mesh[prop_name] = mesh
-
 
 
     ##################################################################
 
-    # === CALIBRATION FILES ===
+    # === READ CALIBRATION FILES ===
 
-    dv_cam_mtx_file_name = [f'{path_camera}/camera_{i}_matrix.npy' for i in range(n_cameras)]
-    dv_cam_mtx = [np.load(file_name) for file_name in dv_cam_mtx_file_name]
-
-    dv_cam_dist_file_name = [f'{path_camera}/camera_{i}_distortion_coefficients.npy' for i in range(n_cameras)]
-    dv_cam_dist = [np.load(file_name) for file_name in dv_cam_dist_file_name]
+    path_projection = info_json['projection_calibration_path']
 
     v_to_dv_rotation_file = [f'{path_projection}/v_to_dv_{i}_rotation.npy' for i in range(n_cameras)]
     v_to_dv_rotation = [np.load(name) for name in v_to_dv_rotation_file]
@@ -387,17 +178,15 @@ def projection():
 
     ##################################################################
 
-    # === DATA FILES ===
-
-    os.makedirs(path_data, exist_ok=True)
+    # === DATA FILE NAMES ===
 
     raw_events_file_name = [f'{path_data}/raw_event_{i}.h5' for i in range(n_cameras)]
     raw_frames_file_name = [f'{path_data}/raw_frame_{i}.h5' for i in range(n_cameras)]
-    raw_vicon_file_name = f'{path_data}/raw_pose.h5'
+    raw_poses_file_name = f'{path_data}/raw_pose.h5'
 
     final_events_file_name = f'{path_data}/event.h5'
     final_frames_file_name = f'{path_data}/frame.h5'
-    final_vicon_file_name = f'{path_data}/pose.h5'
+    final_poses_file_name = f'{path_data}/pose.h5'
 
     # event_video_file_name = [f'{path_data}/event_{i}_video.avi' for i in range(n_cameras)]
     # frame_video_file_name = [f'{path_data}/frame_{i}_video.avi' for i in range(n_cameras)]
@@ -406,84 +195,11 @@ def projection():
     ##################################################################
 
 
+    # load raw Vicon pose data
+    raw_poses_file = tables.open_file(raw_poses_file_name, mode='r')
 
-    if record:
-        print('=== begin recording ===')
-
-        for f in os.listdir(path_data):
-            os.remove(f'{path_data}/{f}')
-
-        info_json = {
-            'start_time': datetime.now().timestamp(),
-            'camera_calibration_path': path_camera,
-            'projection_calibration_path': path_projection,
-            'props_markers': {},
-            'props_mesh': {},
-        }
-        for prop_name in prop_names:
-            info_json['props_markers'][prop_name] = f'{path_props}/{prop_name}_markers.json'
-            info_json['props_mesh'][prop_name] = f'{path_props}/{prop_name}_mesh.stl'
-        with open(f'{path_data}/info.json', 'w') as info_json_file:
-            json.dump(info_json, info_json_file)
-
-        # DVS over network
-        if dv_over_network:
-            print('give the wand signal')
-
-            proc = []
-            for i in range(n_cameras):
-                proc.append(Process(target=get_dvs_network_events, args=(
-                    i, dv_record_time, dv_address, dv_event_port[i],
-                    dv_cam_mtx[i], dv_cam_dist[i], raw_events_file_name[i])))
-                proc.append(Process(target=get_dvs_network_frames, args=(
-                    i, dv_record_time, dv_address, dv_frame_port[i],
-                    dv_cam_mtx[i], dv_cam_dist[i], raw_frames_file_name[i])))
-
-            proc.append(Process(target=get_vicon_network_poses, args=(
-                vicon_record_time, vicon_address, vicon_port,
-                props_markers, raw_vicon_file_name)))
-
-            # start processes
-            for p in proc:
-                p.start()
-
-            # wait for processes
-            for p in proc:
-                p.join()
-
-        else: # not dv_over_netwrok
-            for f in os.listdir(path_aedat):
-                os.remove(f'{path_aedat}/{f}')
-
-            print('start DV recording now and give the wand signal')
-
-            get_vicon_network_poses(vicon_record_time, vicon_address, vicon_port,
-                                    props_markers, raw_vicon_file_name)
-
-            input('stop the dv recording and hit enter')
-
-            aedat_file_name = f'{path_aedat}/{os.listdir(path_aedat)[0]}'
-            for i in range(n_cameras):
-                get_dvs_aedat_file_events(i, aedat_file_name,
-                                          dv_cam_mtx[i], dv_cam_dist[i],
-                                          raw_events_file_name[i])
-                get_dvs_aedat_file_frames(i, aedat_file_name,
-                                          dv_cam_mtx[i], dv_cam_dist[i],
-                                          raw_frames_file_name[i])
-
-        print('=== end recording ===')
-
-        exit(0)
-
-
-    ##################################################################
-
-
-    # load raw Vicon data
-    raw_vicon_file = tables.open_file(raw_vicon_file_name, mode='r')
-
-    # create final Vicon data file
-    final_vicon_file, final_vicon_data = create_pytables_poses_file(final_vicon_file_name, n_cameras, props_markers)
+    # create final Vicon pose data file
+    final_poses_file, final_poses_data = create_pytables_poses_file(final_poses_file_name, n_cameras, props_markers)
 
     # get transforms from mesh space to Vicon space zero
     mesh_to_v0_rotation = {}
@@ -509,7 +225,7 @@ def projection():
 
         return error
 
-    for prop_name in prop_names:
+    for prop_name in props_name:
         mesh_markers = []
         vicon_markers = []
         v0_to_v_rotations = []
@@ -519,10 +235,10 @@ def projection():
         #m = np.random.rand(6) * 2 * np.pi - np.pi
         m = np.array([-0.23134114, -2.83301699,  2.81133181, -1.54930157, -2.35502374,  2.1578688 ])
 
-        indices = np.linspace(0, len(raw_vicon_file.root.timestamp) - 1, 50, dtype='uint64')
+        indices = np.linspace(0, len(raw_poses_file.root.timestamp) - 1, 50, dtype='uint64')
         for i in indices:
-            rotation = raw_vicon_file.root.props[prop_name].vicon_rotation[i]
-            translation = raw_vicon_file.root.props[prop_name].vicon_translation[i]
+            rotation = raw_poses_file.root.props[prop_name].vicon_rotation[i]
+            translation = raw_poses_file.root.props[prop_name].vicon_translation[i]
 
             if not np.isfinite(rotation).all() or not np.isfinite(translation).all():
                 continue
@@ -531,7 +247,7 @@ def projection():
             vicon_marker = np.empty(mesh_marker.shape, dtype='float64')
             for i_marker, marker_name in enumerate(props_markers[prop_name].keys()):
                 mesh_marker[:, i_marker] = props_markers[prop_name][marker_name]
-                vicon_marker[:, i_marker] = raw_vicon_file.root.props[prop_name].vicon_markers[marker_name][i][:, 0]
+                vicon_marker[:, i_marker] = raw_poses_file.root.props[prop_name].vicon_markers[marker_name][i][:, 0]
 
             mesh_markers.append(mesh_marker)
             vicon_markers.append(vicon_marker)
@@ -557,32 +273,32 @@ def projection():
         mesh_to_v0_translation[prop_name] = m[3:6, np.newaxis]
 
 
-    # === PREPROCESS VICON DATA ===
+    # === PREPROCESS VICON POSE DATA ===
     print('begin preprocessing')
 
-    # get raw Vicon data iterators
-    raw_vicon_iter = {}
-    timestamp = raw_vicon_file.root.timestamp
-    raw_vicon_iter['timestamp'] = timestamp.iterrows()
-    raw_vicon_iter['vicon_rotation'] = {}
-    raw_vicon_iter['vicon_translation'] = {}
-    raw_vicon_iter['vicon_markers'] = {}
-    for prop_name in prop_names:
-        rotation = raw_vicon_file.root.props[prop_name].vicon_rotation
-        raw_vicon_iter['vicon_rotation'][prop_name] = rotation.iterrows()
-        translation = raw_vicon_file.root.props[prop_name].vicon_translation
-        raw_vicon_iter['vicon_translation'][prop_name] = translation.iterrows()
-        raw_vicon_iter['vicon_markers'][prop_name] = {}
+    # get raw Vicon pose data iterators
+    raw_poses_iter = {}
+    timestamp = raw_poses_file.root.timestamp
+    raw_poses_iter['timestamp'] = timestamp.iterrows()
+    raw_poses_iter['vicon_rotation'] = {}
+    raw_poses_iter['vicon_translation'] = {}
+    raw_poses_iter['vicon_markers'] = {}
+    for prop_name in props_name:
+        rotation = raw_poses_file.root.props[prop_name].vicon_rotation
+        raw_poses_iter['vicon_rotation'][prop_name] = rotation.iterrows()
+        translation = raw_poses_file.root.props[prop_name].vicon_translation
+        raw_poses_iter['vicon_translation'][prop_name] = translation.iterrows()
+        raw_poses_iter['vicon_markers'][prop_name] = {}
         for marker_name in props_markers[prop_name].keys():
-            marker = raw_vicon_file.root.props[prop_name].vicon_markers[marker_name]
-            raw_vicon_iter['vicon_markers'][prop_name][marker_name] = marker.iterrows()
+            marker = raw_poses_file.root.props[prop_name].vicon_markers[marker_name]
+            raw_poses_iter['vicon_markers'][prop_name][marker_name] = marker.iterrows()
 
-    # initialise good Vicon frame buffer
+    # initialise good Vicon pose buffer
     vicon_timestamp_buffer = {}
     vicon_rotation_buffer = {}
     vicon_translation_buffer = {}
     vicon_markers_buffer = {}
-    for prop_name in prop_names:
+    for prop_name in props_name:
         vicon_timestamp_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_translation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
@@ -590,159 +306,159 @@ def projection():
         for marker_name in props_markers[prop_name].keys():
             vicon_markers_buffer[prop_name][marker_name] = deque(maxlen=vicon_buffer_length)
 
-    vicon = get_next_vicon(raw_vicon_iter)
+    pose = get_next_pose(raw_poses_iter)
 
-    # append to good Vicon frame buffers
-    for prop_name in prop_names:
-        timestamp = vicon['timestamp']
+    # append to good Vicon pose buffers
+    for prop_name in props_name:
+        timestamp = pose['timestamp']
         vicon_timestamp_buffer[prop_name].append(timestamp)
-        rotation = vicon['vicon_rotation'][prop_name]
+        rotation = pose['vicon_rotation'][prop_name]
         vicon_rotation_buffer[prop_name].append(rotation)
-        translation = vicon['vicon_translation'][prop_name]
+        translation = pose['vicon_translation'][prop_name]
         vicon_translation_buffer[prop_name].append(translation)
         for marker_name in props_markers[prop_name].keys():
-            marker = vicon['vicon_markers'][prop_name][marker_name]
+            marker = pose['vicon_markers'][prop_name][marker_name]
             vicon_markers_buffer[prop_name][marker_name].append(marker)
 
-    vicon = get_next_vicon(raw_vicon_iter)
+    pose = get_next_pose(raw_poses_iter)
 
-    bad_frame_count = 0
+    bad_pose_count = 0
     while True:
 
         try:
-            vicon_new = get_next_vicon(raw_vicon_iter)
+            pose_new = get_next_pose(raw_poses_iter)
         except StopIteration:
             break
 
-        final_vicon_data['timestamp'].append([vicon['timestamp']])
+        final_poses_data['timestamp'].append([pose['timestamp']])
 
         # for each prop
-        for prop_name in prop_names:
-            final_vicon_data['extrapolated'][prop_name].append([False])
+        for prop_name in props_name:
+            final_poses_data['extrapolated'][prop_name].append([False])
 
-            v0_to_v_rotation = vicon['vicon_rotation'][prop_name]
-            final_vicon_data['vicon_rotation'][prop_name].append([v0_to_v_rotation])
+            v0_to_v_rotation = pose['vicon_rotation'][prop_name]
+            final_poses_data['vicon_rotation'][prop_name].append([v0_to_v_rotation])
             rotation = mesh_to_v0_rotation[prop_name]
             rotation = np.dot(v0_to_v_rotation, rotation)
-            final_vicon_data['rotation'][prop_name].append([rotation])
+            final_poses_data['rotation'][prop_name].append([rotation])
             for i in range(n_cameras):
                 cam_rotation = np.dot(v_to_dv_rotation[i], rotation)
-                final_vicon_data[f'camera_{i}_rotation'][prop_name].append([cam_rotation])
+                final_poses_data[f'camera_{i}_rotation'][prop_name].append([cam_rotation])
 
-            v0_to_v_translation = vicon['vicon_translation'][prop_name]
-            final_vicon_data['vicon_translation'][prop_name].append([v0_to_v_translation])
+            v0_to_v_translation = pose['vicon_translation'][prop_name]
+            final_poses_data['vicon_translation'][prop_name].append([v0_to_v_translation])
             translation = mesh_to_v0_translation[prop_name]
             translation = np.dot(v0_to_v_rotation, translation) + v0_to_v_translation
-            final_vicon_data['translation'][prop_name].append([translation])
+            final_poses_data['translation'][prop_name].append([translation])
             for i in range(n_cameras):
                 cam_translation = np.dot(v_to_dv_rotation[i], translation) + v_to_dv_translation[i]
-                final_vicon_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
+                final_poses_data[f'camera_{i}_translation'][prop_name].append([cam_translation])
 
             for marker_name in props_markers[prop_name].keys():
-                marker = vicon['vicon_markers'][prop_name][marker_name]
-                final_vicon_data['vicon_markers'][prop_name][marker_name].append([marker])
+                marker = pose['vicon_markers'][prop_name][marker_name]
+                final_poses_data['vicon_markers'][prop_name][marker_name].append([marker])
 
-            # check current Vicon frame
-            frame_is_good = True
+            # check current Vicon pose
+            pose_is_good = True
             for marker_name in props_markers[prop_name].keys():
-                marker = vicon['vicon_markers'][prop_name][marker_name]
+                marker = pose['vicon_markers'][prop_name][marker_name]
                 marker_old = vicon_markers_buffer[prop_name][marker_name][-1]
                 if not all(np.isfinite(marker)) or any(
                         np.abs(marker - marker_old) >= vicon_marker_error_threshold):
-                    frame_is_good = False
+                    pose_is_good = False
 
-            # extrapolate bad Vicon frame
-            if not frame_is_good:
-                #print('DEBUG: bad frame')
-                bad_frame_count += 1
+            # extrapolate bad Vicon pose
+            if not pose_is_good:
+                #print('DEBUG: bad pose')
+                bad_pose_count += 1
 
-                if bad_frame_count < vicon_bad_frame_timeout and len(vicon_timestamp_buffer[prop_name]) > 1:
-                    #print('DEBUG: extrapolating bad frame')
-                    final_vicon_data['extrapolated'][prop_name][-1] = True
+                if bad_pose_count < vicon_bad_pose_timeout and len(vicon_timestamp_buffer[prop_name]) > 1:
+                    #print('DEBUG: extrapolating bad pose')
+                    final_poses_data['extrapolated'][prop_name][-1] = True
 
                     x = np.array(vicon_timestamp_buffer[prop_name])
 
                     y = np.array(vicon_rotation_buffer[prop_name])
                     f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
-                    v0_to_v_rotation = f(vicon['timestamp'])
-                    final_vicon_data['vicon_rotation'][prop_name][-1] = v0_to_v_rotation
+                    v0_to_v_rotation = f(pose['timestamp'])
+                    final_poses_data['vicon_rotation'][prop_name][-1] = v0_to_v_rotation
                     rotation = mesh_to_v0_rotation[prop_name]
                     rotation = np.dot(v0_to_v_rotation, rotation)
-                    final_vicon_data['rotation'][prop_name][-1] = rotation
+                    final_poses_data['rotation'][prop_name][-1] = rotation
                     for i in range(n_cameras):
                         cam_rotation = np.dot(v_to_dv_rotation[i], rotation)
-                        final_vicon_data[f'camera_{i}_rotation'][prop_name][-1] = cam_rotation
+                        final_poses_data[f'camera_{i}_rotation'][prop_name][-1] = cam_rotation
 
                     y = np.array(vicon_translation_buffer[prop_name])
                     f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
-                    v0_to_v_translation = f(vicon['timestamp'])
-                    final_vicon_data['vicon_translation'][prop_name][-1] = v0_to_v_translation
+                    v0_to_v_translation = f(pose['timestamp'])
+                    final_poses_data['vicon_translation'][prop_name][-1] = v0_to_v_translation
                     translation = mesh_to_v0_translation[prop_name]
                     translation = np.dot(v0_to_v_rotation, translation) + v0_to_v_translation
-                    final_vicon_data['translation'][prop_name][-1] = translation
+                    final_poses_data['translation'][prop_name][-1] = translation
                     for i in range(n_cameras):
                         cam_translation = np.dot(v_to_dv_rotation[i], translation) + v_to_dv_translation[i]
-                        final_vicon_data[f'camera_{i}_translation'][prop_name][-1] = cam_translation
+                        final_poses_data[f'camera_{i}_translation'][prop_name][-1] = cam_translation
 
                     for marker_name in props_markers[prop_name].keys():
                         y = np.array(vicon_markers_buffer[prop_name][marker_name])
                         f = interp1d(x, y, axis=0, fill_value='extrapolate', kind='linear')
-                        marker = f(vicon['timestamp'])
-                        final_vicon_data['vicon_markers'][prop_name][marker_name][-1] = marker
+                        marker = f(pose['timestamp'])
+                        final_poses_data['vicon_markers'][prop_name][marker_name][-1] = marker
 
-                else: # bad frame timeout
-                    #print('DEBUG: bad frame timeout')
-                    frame_is_good = True
+                else: # bad pose timeout
+                    #print('DEBUG: bad pose timeout')
+                    pose_is_good = True
 
-                    # clear frame buffer
+                    # clear pose buffer
                     vicon_timestamp_buffer[prop_name].clear()
                     vicon_rotation_buffer[prop_name].clear()
                     vicon_translation_buffer[prop_name].clear()
                     for marker_name in props_markers[prop_name].keys():
                         vicon_markers_buffer[prop_name][marker_name].clear()
 
-                    # void bad frame data
-                    a = max(0, len(final_vicon_data['timestamp']) - vicon_bad_frame_timeout + 1)
-                    b = len(final_vicon_data['timestamp'])
+                    # void bad pose data
+                    a = max(0, len(final_poses_data['timestamp']) - vicon_bad_pose_timeout + 1)
+                    b = len(final_poses_data['timestamp'])
 
-                    final_vicon_data['vicon_rotation'][prop_name][a:b] = np.nan
-                    final_vicon_data['rotation'][prop_name][a:b] = np.nan
+                    final_poses_data['vicon_rotation'][prop_name][a:b] = np.nan
+                    final_poses_data['rotation'][prop_name][a:b] = np.nan
                     for i in range(n_cameras):
-                        final_vicon_data[f'camera_{i}_rotation'][prop_name][a:b] = np.nan
+                        final_poses_data[f'camera_{i}_rotation'][prop_name][a:b] = np.nan
 
-                    final_vicon_data['vicon_translation'][prop_name][a:b] = np.nan
-                    final_vicon_data['translation'][prop_name][a:b] = np.nan
+                    final_poses_data['vicon_translation'][prop_name][a:b] = np.nan
+                    final_poses_data['translation'][prop_name][a:b] = np.nan
                     for i in range(n_cameras):
-                        final_vicon_data[f'camera_{i}_translation'][prop_name][a:b] = np.nan
+                        final_poses_data[f'camera_{i}_translation'][prop_name][a:b] = np.nan
 
                     for marker_name in props_markers[prop_name].keys():
-                        final_vicon_data['vicon_markers'][prop_name][marker_name][a:b] = np.nan
+                        final_poses_data['vicon_markers'][prop_name][marker_name][a:b] = np.nan
 
-            # append good Vicon frame to buffer
-            if frame_is_good:
-                #print('DEBUG: good frame')
-                bad_frame_count = 0
+            # append good Vicon pose to buffer
+            if pose_is_good:
+                #print('DEBUG: good pose')
+                bad_pose_count = 0
 
-                # append to good Vicon frame buffers
-                timestamp = vicon['timestamp']
+                # append to good Vicon pose buffers
+                timestamp = pose['timestamp']
                 vicon_timestamp_buffer[prop_name].append(timestamp)
 
-                rotation = vicon['vicon_rotation'][prop_name]
+                rotation = pose['vicon_rotation'][prop_name]
                 vicon_rotation_buffer[prop_name].append(rotation)
 
-                translation = vicon['vicon_translation'][prop_name]
+                translation = pose['vicon_translation'][prop_name]
                 vicon_translation_buffer[prop_name].append(translation)
 
                 for marker_name in props_markers[prop_name].keys():
-                    marker = vicon['vicon_markers'][prop_name][marker_name]
+                    marker = pose['vicon_markers'][prop_name][marker_name]
                     vicon_markers_buffer[prop_name][marker_name].append(marker)
 
 
-        vicon = vicon_new
+        pose = pose_new
 
 
-    raw_vicon_file.close()
-    final_vicon_file.close()
+    raw_poses_file.close()
+    final_poses_file.close()
 
     print('finished preprocessing')
 
@@ -766,7 +482,7 @@ def projection():
     frame_label = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='int8') for i in range(n_cameras)]
     frame_label_depth = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='float64') for i in range(n_cameras)]
     prop_masks = [{prop_name: np.empty((dv_cam_height[i], dv_cam_width[i]), dtype='uint8')
-                   for prop_name in prop_names} for i in range(n_cameras)]
+                   for prop_name in props_name} for i in range(n_cameras)]
 
     # load raw DV event data
     raw_events_file = []
@@ -793,49 +509,49 @@ def projection():
         raw_frames_file.append(f_file)
         raw_frame_iter.append(f_iter)
 
-    # load final Vicon data file
-    final_vicon_file = tables.open_file(final_vicon_file_name, mode='r')
-    final_vicon_iter = {}
-    timestamp = final_vicon_file.root.timestamp
-    final_vicon_iter['timestamp'] = timestamp.iterrows()
-    final_vicon_iter['extrapolated'] = {}
+    # load final Vicon pose data file
+    final_poses_file = tables.open_file(final_poses_file_name, mode='r')
+    final_poses_iter = {}
+    timestamp = final_poses_file.root.timestamp
+    final_poses_iter['timestamp'] = timestamp.iterrows()
+    final_poses_iter['extrapolated'] = {}
 
-    final_vicon_iter['vicon_rotation'] = {}
-    final_vicon_iter['rotation'] = {}
+    final_poses_iter['vicon_rotation'] = {}
+    final_poses_iter['rotation'] = {}
     for i in range(n_cameras):
-        final_vicon_iter[f'camera_{i}_rotation'] = {}
+        final_poses_iter[f'camera_{i}_rotation'] = {}
 
-    final_vicon_iter['vicon_translation'] = {}
-    final_vicon_iter['translation'] = {}
+    final_poses_iter['vicon_translation'] = {}
+    final_poses_iter['translation'] = {}
     for i in range(n_cameras):
-        final_vicon_iter[f'camera_{i}_translation'] = {}
+        final_poses_iter[f'camera_{i}_translation'] = {}
 
-    final_vicon_iter['vicon_markers'] = {}
+    final_poses_iter['vicon_markers'] = {}
 
-    for prop_name in prop_names:
-        extrapolated = final_vicon_file.root.props[prop_name].extrapolated
-        final_vicon_iter['extrapolated'][prop_name] = extrapolated.iterrows()
+    for prop_name in props_name:
+        extrapolated = final_poses_file.root.props[prop_name].extrapolated
+        final_poses_iter['extrapolated'][prop_name] = extrapolated.iterrows()
 
-        rotation = final_vicon_file.root.props[prop_name].vicon_rotation
-        final_vicon_iter['vicon_rotation'][prop_name] = rotation.iterrows()
-        rotation = final_vicon_file.root.props[prop_name].rotation
-        final_vicon_iter['rotation'][prop_name] = rotation.iterrows()
+        rotation = final_poses_file.root.props[prop_name].vicon_rotation
+        final_poses_iter['vicon_rotation'][prop_name] = rotation.iterrows()
+        rotation = final_poses_file.root.props[prop_name].rotation
+        final_poses_iter['rotation'][prop_name] = rotation.iterrows()
         for i in range(n_cameras):
-            cam_rotation = final_vicon_file.root.props[prop_name][f'camera_{i}_rotation']
-            final_vicon_iter[f'camera_{i}_rotation'][prop_name] = cam_rotation.iterrows()
+            cam_rotation = final_poses_file.root.props[prop_name][f'camera_{i}_rotation']
+            final_poses_iter[f'camera_{i}_rotation'][prop_name] = cam_rotation.iterrows()
 
-        translation = final_vicon_file.root.props[prop_name].vicon_translation
-        final_vicon_iter['vicon_translation'][prop_name] = translation.iterrows()
-        translation = final_vicon_file.root.props[prop_name].translation
-        final_vicon_iter['translation'][prop_name] = translation.iterrows()
+        translation = final_poses_file.root.props[prop_name].vicon_translation
+        final_poses_iter['vicon_translation'][prop_name] = translation.iterrows()
+        translation = final_poses_file.root.props[prop_name].translation
+        final_poses_iter['translation'][prop_name] = translation.iterrows()
         for i in range(n_cameras):
-            cam_translation = final_vicon_file.root.props[prop_name][f'camera_{i}_translation']
-            final_vicon_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
+            cam_translation = final_poses_file.root.props[prop_name][f'camera_{i}_translation']
+            final_poses_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
 
-        final_vicon_iter['vicon_markers'][prop_name] = {}
+        final_poses_iter['vicon_markers'][prop_name] = {}
         for marker_name in props_markers[prop_name].keys():
-            marker = final_vicon_file.root.props[prop_name].vicon_markers[marker_name]
-            final_vicon_iter['vicon_markers'][prop_name][marker_name] = marker.iterrows()
+            marker = final_poses_file.root.props[prop_name].vicon_markers[marker_name]
+            final_poses_iter['vicon_markers'][prop_name][marker_name] = marker.iterrows()
 
     # create final DV event and frame data files
     final_events_file, final_event_data = create_pytables_events_file(final_events_file_name, n_cameras)
@@ -929,7 +645,7 @@ def projection():
 
 
     # get first Vicon pose
-    vicon = get_next_vicon(final_vicon_iter)
+    pose = get_next_pose(final_poses_iter)
 
 
 
@@ -939,22 +655,22 @@ def projection():
     while not all(done_event) or not all(done_frame):
 
         try:
-            vicon_new = get_next_vicon(final_vicon_iter)
-            vicon_midway = vicon['timestamp'] / 2 + vicon_new['timestamp'] / 2
+            pose_new = get_next_pose(final_poses_iter)
+            pose_midway = pose['timestamp'] / 2 + pose_new['timestamp'] / 2
         except StopIteration:
             #print('DEBUG: out of vicon poses')
             break
 
         print()
-        print('Vicon frame timestamp: ', vicon['timestamp'])
+        print('Vicon pose timestamp: ', pose['timestamp'])
 
-        for prop_name in prop_names:
-            #print(f'DEBUG: extrapolated {prop_name}:', vicon['extrapolated'][prop_name])
+        for prop_name in props_name:
+            #print(f'DEBUG: extrapolated {prop_name}:', pose['extrapolated'][prop_name])
 
             # transform to DV camera space
             for i in range(n_cameras):
-                mesh_to_dv_rotation = vicon[f'camera_{i}_rotation'][prop_name]
-                mesh_to_dv_translation = vicon[f'camera_{i}_translation'][prop_name]
+                mesh_to_dv_rotation = pose[f'camera_{i}_rotation'][prop_name]
+                mesh_to_dv_translation = pose[f'camera_{i}_translation'][prop_name]
 
                 if not np.isfinite(mesh_to_dv_rotation).all() or not np.isfinite(mesh_to_dv_translation).all():
                     prop_masks[i][prop_name].fill(0)
@@ -984,14 +700,14 @@ def projection():
             if not done_frame[i]:
 
                 timestamp = frame[i][f'timestamp_{i}'] - dv_start_timestamp[i]
-                while timestamp <= vicon['timestamp']:
+                while timestamp <= pose['timestamp']:
                     image = frame_image[i]
                     label = frame_label[i]
                     label_depth = frame_label_depth[i]
 
                     # mask DV frame image
                     image[:] = frame[i][f'image_undistorted_{i}']
-                    for prop_name in prop_names:
+                    for prop_name in props_name:
                         mask = prop_masks[i][prop_name].astype('bool')
                         image[mask, :] = blue
 
@@ -1002,7 +718,7 @@ def projection():
                         prop_name = list(props_markers)[j]
                         mask = prop_masks[i][prop_name].astype('bool')
 
-                        prop_depth = vicon[f'camera_{i}_translation'][prop_name][2, 0]
+                        prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
                         label[mask & (prop_depth < label_depth)] = j
                         label_depth[mask & (prop_depth < label_depth)] = prop_depth
 
@@ -1046,7 +762,7 @@ def projection():
                 neg.fill(0)
 
                 timestamp = event[i][f'timestamp_{i}'] - dv_start_timestamp[i]
-                while timestamp < vicon_midway:
+                while timestamp < pose_midway:
 
                     # check DV event is in frame
                     xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
@@ -1073,7 +789,7 @@ def projection():
                             prop_name = list(props_markers)[j]
                             mask = prop_masks[i][prop_name].astype('bool')
 
-                            prop_depth = vicon[f'camera_{i}_translation'][prop_name][2, 0]
+                            prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
                             if mask[xy_int[1], xy_int[0]]:
                                 if prop_depth < label_depth:
                                     label = j
@@ -1097,7 +813,7 @@ def projection():
 
 
                 # fill DV event image with events, then mask it
-                for prop_name in prop_names:
+                for prop_name in props_name:
                     mask = prop_masks[i][prop_name].astype('bool')
                     image[mask] = grey # show prop mask?
                     if event_distinguish_polarity:
@@ -1120,7 +836,7 @@ def projection():
                     done_event[i] = True
 
 
-        vicon = vicon_new
+        pose = pose_new
 
 
 
@@ -1130,7 +846,7 @@ def projection():
         raw_frames_file[i].close()
     final_events_file.close()
     final_frames_file.close()
-    final_vicon_file.close()
+    final_poses_file.close()
 
     # for i in range(n_cameras):
     #     event_video_file[i].release()
@@ -1140,4 +856,7 @@ def projection():
 
 
 if __name__ == '__main__':
-    projection()
+    parser = ArgumentParser()
+    parser.add_argument('path_data')
+    args = parser.parse_args()
+    projection(args.path_data)

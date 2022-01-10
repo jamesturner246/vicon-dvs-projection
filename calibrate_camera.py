@@ -14,7 +14,8 @@ def calibrate():
     cb_cols = 6
 
     # files
-    path = './camera_calibration'
+    date = time.strftime('%Y%m%d')
+    path = f'./camera_calibration/{date}'
     os.makedirs(path, exist_ok=True)
     mtx_file_name = [f'{path}/camera_{i}_matrix.npy' for i in range(2)]
     dist_file_name = [f'{path}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
@@ -83,7 +84,8 @@ def calibrate():
 def test():
 
     # files
-    path = './camera_calibration'
+    date = time.strftime('%Y%m%d')
+    path = f'./camera_calibration/{date}'
     mtx_file_name = [f'{path}/camera_{i}_matrix.npy' for i in range(2)]
     dist_file_name = [f'{path}/camera_{i}_distortion_coefficients.npy' for i in range(2)]
 
