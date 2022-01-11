@@ -498,8 +498,13 @@ def calibrate():
     debug = False
     test = True
 
-    path_camera = './camera_calibration'
-    path_projection = './projection_calibration'
+    #path_camera = './camera_calibration'
+    path_camera = sorted(os.listdir('./camera_calibration'))[-1]
+    path_camera = f'./camera_calibration/{path_camera}'
+
+    #path_projection = './projection_calibration'
+    path_projection = sorted(os.listdir('./projection_calibration'))[-1]
+    path_projection = f'./projection_calibration/{path_projection}'
 
     # make calibration directories
     os.makedirs(path_projection, exist_ok=True)
