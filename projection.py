@@ -712,6 +712,17 @@ def projection(path_data):
                         mask = prop_masks[i][prop_name].astype('bool')
                         image[mask, :] = blue
 
+                    # # uncomment to plot prop centre translation
+                    # dv_space_p = pose[f'camera_{i}_translation'][prop_name].T[0]
+                    # dv_space_p[:2] *= (1 / dv_space_p[2])
+                    # dv_space_p = dv_space_p[:2]
+                    # dv_space_p *= v_to_dv_f_len[i]
+                    # dv_space_p /= dv_cam_pixel_mm[i]
+                    # dv_space_p *= v_to_dv_x_scale[i]
+                    # dv_space_p += [dv_cam_origin_x_offset[i], dv_cam_origin_y_offset[i]]
+                    # dv_space_p_int = np.rint(dv_space_p).astype('int32')
+                    # cv2.circle(image, (dv_space_p_int[0], dv_space_p_int[1]), 3, (0, 255, 0), -1)
+
                     # get frame label
                     label.fill(0)
                     label_depth.fill(np.inf)

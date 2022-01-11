@@ -494,8 +494,8 @@ def calibrate():
 
     n_epoch = 20
 
-    reuse = True
-    debug = False
+    reuse = False
+    debug = True
     test = True
 
     #path_camera = './camera_calibration'

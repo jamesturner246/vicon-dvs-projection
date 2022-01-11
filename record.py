@@ -1,8 +1,17 @@
+import os
+import shutil
+import time
+import json
+import pause
 from datetime import datetime
 import numpy as np
 import cv2
 from vicon_dssdk import ViconDataStream
 import dv
+
+from events import *
+from frames import *
+from poses import *
 
 
 def get_vicon_network_poses(record_time, address, port, props_markers, poses_file_name):
@@ -87,15 +96,16 @@ def get_vicon_network_poses(record_time, address, port, props_markers, poses_fil
     return
 
 
-def get_dvs_aedat_file_events(camera, aedat_file_name, mtx, dist, events_file_name):
+def WITHOUT_NUMPY_get_dvs_aedat_file_events(camera, n_cameras, aedat_file_name, mtx, dist, events_file_name):
     events_file, events_data = create_pytables_events_file(events_file_name, n_cameras)
 
+    print(f'get camera {camera} event data')
     with dv.AedatFile(aedat_file_name) as f:
 
         if camera == 0:
-            events = f['events']#.numpy() # TODO: test numpy iterators
+            events = f['events']
         else:
-            events = f[f'events_{camera}']#.numpy() # TODO: test numpy iterators
+            events = f[f'events_{camera}']
 
         for event in events:
             # undistort event
@@ -112,15 +122,43 @@ def get_dvs_aedat_file_events(camera, aedat_file_name, mtx, dist, events_file_na
     return
 
 
-def get_dvs_aedat_file_frames(camera, aedat_file_name, mtx, dist, frames_file_name):
-    frames_file, frames_data = create_pytables_frames_file(frames_file_name, n_cameras)
+def get_dvs_aedat_file_events(camera, n_cameras, aedat_file_name, mtx, dist, events_file_name):
+    events_file, events_data = create_pytables_events_file(events_file_name, n_cameras)
 
+    print(f'get camera {camera} event data')
     with dv.AedatFile(aedat_file_name) as f:
 
         if camera == 0:
-            frames = f['frames']#.numpy() # TODO: test numpy iterators
+            events = f['events']
         else:
-            frames = f[f'frames_{camera}']#.numpy() # TODO: test numpy iterators
+            events = f[f'events_{camera}']
+        events = np.hstack([packet for packet in events.numpy()])
+
+        for timestamp, polarity, x, y in zip(events['timestamp'], events['polarity'], events['x'], events['y']):
+            # undistort event
+            event_xy_raw = np.array([x, y], dtype='float64')
+            event_xy_undistorted = cv2.undistortPoints(
+                event_xy_raw, mtx, dist, None, mtx)[0, 0]
+
+            events_data[f'timestamp_{camera}'].append([timestamp])
+            events_data[f'polarity_{camera}'].append([polarity])
+            events_data[f'xy_raw_{camera}'].append([event_xy_raw])
+            events_data[f'xy_undistorted_{camera}'].append([event_xy_undistorted])
+
+    events_file.close()
+    return
+
+
+def get_dvs_aedat_file_frames(camera, n_cameras, aedat_file_name, mtx, dist, frames_file_name):
+    frames_file, frames_data = create_pytables_frames_file(frames_file_name, n_cameras)
+
+    print(f'get camera {camera} frame data')
+    with dv.AedatFile(aedat_file_name) as f:
+
+        if camera == 0:
+            frames = f['frames']
+        else:
+            frames = f[f'frames_{camera}']
 
         for frame in frames:
             # undistort frame
@@ -163,6 +201,7 @@ def record():
     path_projection = f'./projection_calibration/{path_projection}'
 
     path_props = './props'
+
     path_aedat = 'J:/dv_recording'
 
     # servers
@@ -170,8 +209,8 @@ def record():
 
     # comment out as required
     prop_names = [
-        'kth_hammer',
-        #'kth_screwdriver',
+        #'kth_hammer',
+        'kth_screwdriver',
         #'kth_spanner',
         #'jpt_mallet',
         #'jpt_screwdriver',
@@ -199,9 +238,10 @@ def record():
     # === DATA FILES ===
 
     os.makedirs(path_data, exist_ok=True)
-
     for f in os.listdir(path_data):
         os.remove(f'{path_data}/{f}')
+    # for f in os.listdir(path_aedat):
+    #     os.remove(f'{path_aedat}/{f}')
 
     events_file_name = [f'{path_data}/raw_event_{i}.h5' for i in range(n_cameras)]
     frames_file_name = [f'{path_data}/raw_frame_{i}.h5' for i in range(n_cameras)]
@@ -232,15 +272,19 @@ def record():
 
     get_vicon_network_poses(vicon_record_time, vicon_address, vicon_port, props_markers, poses_file_name)
 
+    print('\n\n\n\n\n')
     input('stop the dv recording and hit enter')
 
-    # for f in os.listdir(path_aedat):
-    #     os.remove(f'{path_aedat}/{f}')
-
     aedat_file_name = f'{path_aedat}/{sorted(os.listdir(path_aedat))[-1]}'
+    shutil.copy(aedat_file_name, path_data)
 
     for i in range(n_cameras):
-        get_dvs_aedat_file_events(i, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i], events_file_name[i])
-        get_dvs_aedat_file_frames(i, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i], frames_file_name[i])
+        get_dvs_aedat_file_events(i, n_cameras, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i], events_file_name[i])
+        get_dvs_aedat_file_frames(i, n_cameras, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i], frames_file_name[i])
 
+    print('\n\n\n\n\n')
     print('=== end recording ===')
+
+
+if __name__ == '__main__':
+    record()
