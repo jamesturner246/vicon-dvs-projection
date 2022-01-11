@@ -150,7 +150,8 @@ def projection(path_data):
         with open(info_json['prop_marker_files'][prop_name], 'r') as marker_file:
             markers = json.load(marker_file)
         props_markers[prop_name] = markers
-        translation = np.mean(list(markers.values()), 0).T
+        #translation = np.mean(list(markers.values()), 0).T # average translation of vertices
+        translation = ((np.max(list(markers.values()), 0) - np.min(list(markers.values()), 0)) / 2).T
         props_translation[prop_name] = translation
         mesh = stl.mesh.Mesh.from_file(info_json['prop_mesh_files'][prop_name]).vectors.transpose(0, 2, 1)
         props_mesh[prop_name] = mesh

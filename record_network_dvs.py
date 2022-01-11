@@ -151,13 +151,17 @@ def record_network_dvs():
     #date_data = 20210929
     path_data = f'./data/{date_data}_{test_initials}_{test_scenario}/{test_number:04}'
 
-    date_camera = time.strftime('%Y%m%d')
+    #date_camera = time.strftime('%Y%m%d')
     #date_camera = 20210922
-    path_camera = f'./camera_calibration/{date_camera}'
+    #path_camera = f'./camera_calibration/{date_camera}'
+    path_camera = sorted(os.listdir('./camera_calibration'))[-1]
+    path_camera = f'./camera_calibration/{path_camera}'
 
-    date_projection = time.strftime('%Y%m%d')
+    #date_projection = time.strftime('%Y%m%d')
     #date_projection = 20210922
-    path_projection = f'./projection_calibration/{date_projection}'
+    #path_projection = f'./projection_calibration/{date_projection}'
+    path_projection = sorted(os.listdir('./projection_calibration'))[-1]
+    path_projection = f'./projection_calibration/{path_projection}'
 
     path_props = './props'
 
