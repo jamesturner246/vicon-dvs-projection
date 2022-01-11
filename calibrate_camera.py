@@ -41,6 +41,8 @@ def calibrate():
         objpoints = [] # 3d point in real world space
         imgpoints = [] # 2d points in image plane.
 
+        sample_i = 0
+
         with dv.NetworkFrameInput(address=dv_address, port=dv_frame_port[i]) as f:
 
             for frame in f:
@@ -69,6 +71,9 @@ def calibrate():
                         elif k == ord(' '):
                             objpoints.append(objp)
                             imgpoints.append(corners)
+
+                            print(sample_i)
+                            sample_i += 1
 
                         cv2.destroyWindow('chessboard corners')
 
