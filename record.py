@@ -286,7 +286,7 @@ def record():
     input('stop the dv recording and hit enter')
 
     aedat_file_name = f'{path_aedat}/{sorted(os.listdir(path_aedat))[-1]}'
-    shutil.copy(aedat_file_name, path_data)
+    #shutil.copy(aedat_file_name, path_data)
 
     for i in range(n_cameras):
         get_dvs_aedat_file_events(i, n_cameras, aedat_file_name, dv_cam_mtx[i], dv_cam_dist[i], events_file_name[i])
