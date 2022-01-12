@@ -140,13 +140,15 @@ def projection(path_data):
 
     # props_markers:      contains the translation of each marker, relative to prop origin
     # props_translation:  contains the translation of the root segment (mean marker translation)
-    # props_mesh:         contains prop STL meshes (polygon, translation, vertex)
+    # props_meshes:       contains prop STL meshes (polygon, translation, vertex)
+    # props_labels:       contains integer > 0 class labels of the props
     props_markers = {}
     props_translation = {}
-    props_mesh = {}
+    props_meshes = {}
+    props_labels = {}
 
-    props_name = list(info_json['prop_marker_files'].keys())
-    for prop_name in props_name:
+    props_names = list(info_json['prop_marker_files'].keys())
+    for prop_name in props_names:
         with open(info_json['prop_marker_files'][prop_name], 'r') as marker_file:
             markers = json.load(marker_file)
         props_markers[prop_name] = markers
@@ -154,7 +156,8 @@ def projection(path_data):
         translation = ((np.max(list(markers.values()), 0) - np.min(list(markers.values()), 0)) / 2).T
         props_translation[prop_name] = translation
         mesh = stl.mesh.Mesh.from_file(info_json['prop_mesh_files'][prop_name]).vectors.transpose(0, 2, 1)
-        props_mesh[prop_name] = mesh
+        props_meshes[prop_name] = mesh
+        props_labels[prop_name] = info_json['prop_labels'][prop_name]
 
 
     ##################################################################
@@ -226,7 +229,7 @@ def projection(path_data):
 
         return error
 
-    for prop_name in props_name:
+    for prop_name in props_names:
         mesh_markers = []
         vicon_markers = []
         v0_to_v_rotations = []
@@ -284,7 +287,7 @@ def projection(path_data):
     raw_poses_iter['vicon_rotation'] = {}
     raw_poses_iter['vicon_translation'] = {}
     raw_poses_iter['vicon_markers'] = {}
-    for prop_name in props_name:
+    for prop_name in props_names:
         rotation = raw_poses_file.root.props[prop_name].vicon_rotation
         raw_poses_iter['vicon_rotation'][prop_name] = rotation.iterrows()
         translation = raw_poses_file.root.props[prop_name].vicon_translation
@@ -299,7 +302,7 @@ def projection(path_data):
     vicon_rotation_buffer = {}
     vicon_translation_buffer = {}
     vicon_markers_buffer = {}
-    for prop_name in props_name:
+    for prop_name in props_names:
         vicon_timestamp_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_rotation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
         vicon_translation_buffer[prop_name] = deque(maxlen=vicon_buffer_length)
@@ -310,7 +313,7 @@ def projection(path_data):
     pose = get_next_pose(raw_poses_iter)
 
     # append to good Vicon pose buffers
-    for prop_name in props_name:
+    for prop_name in props_names:
         timestamp = pose['timestamp']
         vicon_timestamp_buffer[prop_name].append(timestamp)
         rotation = pose['vicon_rotation'][prop_name]
@@ -334,7 +337,7 @@ def projection(path_data):
         final_poses_data['timestamp'].append([pose['timestamp']])
 
         # for each prop
-        for prop_name in props_name:
+        for prop_name in props_names:
             final_poses_data['extrapolated'][prop_name].append([False])
 
             v0_to_v_rotation = pose['vicon_rotation'][prop_name]
@@ -483,7 +486,7 @@ def projection(path_data):
     frame_label = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='int8') for i in range(n_cameras)]
     frame_label_depth = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='float64') for i in range(n_cameras)]
     prop_masks = [{prop_name: np.empty((dv_cam_height[i], dv_cam_width[i]), dtype='uint8')
-                   for prop_name in props_name} for i in range(n_cameras)]
+                   for prop_name in props_names} for i in range(n_cameras)]
 
     # load raw DV event data
     raw_events_file = []
@@ -529,7 +532,7 @@ def projection(path_data):
 
     final_poses_iter['vicon_markers'] = {}
 
-    for prop_name in props_name:
+    for prop_name in props_names:
         extrapolated = final_poses_file.root.props[prop_name].extrapolated
         final_poses_iter['extrapolated'][prop_name] = extrapolated.iterrows()
 
@@ -665,19 +668,21 @@ def projection(path_data):
         print()
         print('Vicon pose timestamp: ', pose['timestamp'])
 
-        for prop_name in props_name:
+        for prop_name in props_names:
             #print(f'DEBUG: extrapolated {prop_name}:', pose['extrapolated'][prop_name])
 
-            # transform to DV camera space
+            # compute prop mask for each camera
             for i in range(n_cameras):
+                prop_masks[i][prop_name].fill(0)
+
                 mesh_to_dv_rotation = pose[f'camera_{i}_rotation'][prop_name]
                 mesh_to_dv_translation = pose[f'camera_{i}_translation'][prop_name]
 
                 if not np.isfinite(mesh_to_dv_rotation).all() or not np.isfinite(mesh_to_dv_translation).all():
-                    prop_masks[i][prop_name].fill(0)
                     continue
 
-                dv_space_p = np.matmul(mesh_to_dv_rotation, props_mesh[prop_name]) + mesh_to_dv_translation
+                # transform to DV camera space
+                dv_space_p = np.matmul(mesh_to_dv_rotation, props_meshes[prop_name]) + mesh_to_dv_translation
                 dv_space_p[:, :2, :] *= (1 / dv_space_p[:, np.newaxis, 2, :])
                 dv_space_p = dv_space_p[:, :2, :]
                 dv_space_p *= v_to_dv_f_len[i]
@@ -690,7 +695,6 @@ def projection(path_data):
                 dv_space_p_int = dv_space_p_int.transpose(0, 2, 1)
 
                 # compute prop mask
-                prop_masks[i][prop_name].fill(0)
                 cv2.fillPoly(prop_masks[i][prop_name], dv_space_p_int, 255)
                 prop_masks[i][prop_name] = cv2.dilate(prop_masks[i][prop_name], prop_mask_dilation_kernel)
 
@@ -708,7 +712,7 @@ def projection(path_data):
 
                     # mask DV frame image
                     image[:] = frame[i][f'image_undistorted_{i}']
-                    for prop_name in props_name:
+                    for prop_name in props_names:
                         mask = prop_masks[i][prop_name].astype('bool')
                         image[mask, :] = blue
 
@@ -726,12 +730,10 @@ def projection(path_data):
                     # get frame label
                     label.fill(0)
                     label_depth.fill(np.inf)
-                    for j in range(len(props_markers)):
-                        prop_name = list(props_markers)[j]
+                    for prop_name in props_names:
                         mask = prop_masks[i][prop_name].astype('bool')
-
                         prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
-                        label[mask & (prop_depth < label_depth)] = j
+                        label[mask & (prop_depth < label_depth)] = props_labels[prop_name]
                         label_depth[mask & (prop_depth < label_depth)] = prop_depth
 
                     # record final frame data
@@ -797,14 +799,12 @@ def projection(path_data):
                         # get event label
                         label = 0
                         label_depth = np.inf
-                        for j in range(len(props_markers)):
-                            prop_name = list(props_markers)[j]
+                        for prop_name in props_names:
                             mask = prop_masks[i][prop_name].astype('bool')
-
                             prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
                             if mask[xy_int[1], xy_int[0]]:
                                 if prop_depth < label_depth:
-                                    label = j
+                                    label = props_labels[prop_name]
                                     label_depth = prop_depth
 
                         # record final event data
@@ -825,7 +825,7 @@ def projection(path_data):
 
 
                 # fill DV event image with events, then mask it
-                for prop_name in props_name:
+                for prop_name in props_names:
                     mask = prop_masks[i][prop_name].astype('bool')
                     image[mask] = grey # show prop mask?
                     if event_distinguish_polarity:

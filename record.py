@@ -57,8 +57,8 @@ def get_vicon_network_poses(record_time, address, port, props_markers, poses_fil
         timestamp = int((current_time - start_time) * 1000000)
         data['timestamp'].append([timestamp])
 
-        prop_names = props_markers.keys()
-        for prop_name in prop_names:
+        props_names = props_markers.keys()
+        for prop_name in props_names:
             marker_names = props_markers[prop_name].keys()
 
             try:
@@ -208,7 +208,7 @@ def record():
     vicon_address, vicon_port = '127.0.0.1', 801
 
     # comment out as required
-    prop_names = [
+    props_names = [
         #'kth_hammer',
         'kth_screwdriver',
         #'kth_spanner',
@@ -216,8 +216,16 @@ def record():
         #'jpt_screwdriver',
     ]
 
+    props_labels = {
+        'kth_hammer': 1,
+        'kth_screwdriver': 2,
+        'kth_spanner': 3,
+        'jpt_mallet': 4,
+        'jpt_screwdriver': 5,
+    }
+
     props_markers = {}
-    for prop_name in prop_names:
+    for prop_name in props_names:
         with open(f'{path_props}/{prop_name}_markers.json', 'r') as marker_file:
             props_markers[prop_name] = json.load(marker_file)
 
@@ -256,11 +264,13 @@ def record():
         'projection_calibration_path': path_projection,
         'prop_marker_files': {},
         'prop_mesh_files': {},
+        'prop_labels': {},
     }
 
-    for prop_name in prop_names:
+    for prop_name in props_names:
         info_json['prop_marker_files'][prop_name] = f'{path_props}/{prop_name}_markers.json'
         info_json['prop_mesh_files'][prop_name] = f'{path_props}/{prop_name}_mesh.stl'
+        info_json['prop_labels'][prop_name] = props_labels[prop_name]
 
     with open(f'{path_data}/info.json', 'w') as info_json_file:
         json.dump(info_json, info_json_file)
