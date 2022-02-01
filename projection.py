@@ -133,11 +133,9 @@ def projection(path_data):
     # === READ PROPS DATA ===
 
     # props_markers:      contains the translation of each marker, relative to prop origin
-    # props_translation:  contains the translation of the root segment (mean marker translation)
     # props_meshes:       contains prop STL meshes (polygon, translation, vertex)
     # props_labels:       contains integer > 0 class labels of the props
     props_markers = {}
-    props_translation = {}
     props_meshes = {}
     props_labels = {}
 
@@ -146,9 +144,6 @@ def projection(path_data):
         with open(info_json['prop_marker_files'][prop_name], 'r') as marker_file:
             markers = json.load(marker_file)
         props_markers[prop_name] = markers
-        #translation = np.mean(list(markers.values()), 0).T # average translation of vertices
-        translation = ((np.max(list(markers.values()), 0) - np.min(list(markers.values()), 0)) / 2).T
-        props_translation[prop_name] = translation
         mesh = stl.mesh.Mesh.from_file(info_json['prop_mesh_files'][prop_name]).vectors.transpose(0, 2, 1)
         props_meshes[prop_name] = mesh
         props_labels[prop_name] = info_json['prop_labels'][prop_name]
