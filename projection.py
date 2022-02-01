@@ -49,12 +49,6 @@ def get_next_pose(poses_iter):
         pose['timestamp'] = next(
             poses_iter['timestamp'])
 
-    if 'extrapolated' in poses_iter:
-        pose['extrapolated'] = {}
-        for prop_name in poses_iter['extrapolated'].keys():
-            pose['extrapolated'][prop_name] = next(
-                poses_iter['extrapolated'][prop_name])
-
     if 'vicon_rotation' in poses_iter:
         pose['vicon_rotation'] = {}
         for prop_name in poses_iter['vicon_rotation'].keys():
@@ -338,8 +332,6 @@ def projection(path_data):
 
         # for each prop
         for prop_name in props_names:
-            final_poses_data['extrapolated'][prop_name].append([False])
-
             v0_to_v_rotation = pose['vicon_rotation'][prop_name]
             rotation = mesh_to_v0_rotation[prop_name]
             rotation = np.dot(v0_to_v_rotation, rotation)
@@ -372,8 +364,6 @@ def projection(path_data):
 
                 if bad_pose_count < vicon_bad_pose_timeout and len(vicon_timestamp_buffer[prop_name]) > 1:
                     #print('DEBUG: extrapolating bad pose')
-                    final_poses_data['extrapolated'][prop_name][-1] = True
-
                     x = np.array(vicon_timestamp_buffer[prop_name])
 
                     y = np.array(vicon_rotation_buffer[prop_name])
@@ -499,7 +489,6 @@ def projection(path_data):
     final_poses_iter = {}
     timestamp = final_poses_file.root.timestamp
     final_poses_iter['timestamp'] = timestamp.iterrows()
-    final_poses_iter['extrapolated'] = {}
 
     final_poses_iter['rotation'] = {}
     for i in range(n_cameras):
@@ -510,9 +499,6 @@ def projection(path_data):
         final_poses_iter[f'camera_{i}_translation'] = {}
 
     for prop_name in props_names:
-        extrapolated = final_poses_file.root.props[prop_name].extrapolated
-        final_poses_iter['extrapolated'][prop_name] = extrapolated.iterrows()
-
         rotation = final_poses_file.root.props[prop_name].rotation
         final_poses_iter['rotation'][prop_name] = rotation.iterrows()
         for i in range(n_cameras):
@@ -637,7 +623,6 @@ def projection(path_data):
         print('Vicon pose timestamp: ', pose['timestamp'])
 
         for prop_name in props_names:
-            #print(f'DEBUG: extrapolated {prop_name}:', pose['extrapolated'][prop_name])
 
             # compute prop mask for each camera
             for i in range(n_cameras):
