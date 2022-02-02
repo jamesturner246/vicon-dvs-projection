@@ -6,7 +6,7 @@ Manually find first DVS event and frame after start signal
 '''
 
 def seek_dvs_start(
-        n_cameras,
+        n_cameras, dvs_cam_height, dvs_cam_width,
         events_file, events_iter,
         frames_file, frames_iter,
         start_signal_delay_secs=3):
@@ -14,9 +14,9 @@ def seek_dvs_start(
     dvs_start_timestamp = [None for i in range(n_cameras)]
 
     for i in range(n_cameras):
-        search_image = np.empty((dv_cam_height[i], dv_cam_width[i] * 2, 3), dtype='uint8')
-        event_search_image = search_image[:, :dv_cam_width[i]]
-        frame_search_image = search_image[:, dv_cam_width[i]:]
+        search_image = np.empty((dvs_cam_height[i], dvs_cam_width[i] * 2, 3), dtype='uint8')
+        event_search_image = search_image[:, :dvs_cam_width[i]]
+        frame_search_image = search_image[:, dvs_cam_width[i]:]
 
         batch = 30
         i_event = 0
@@ -34,7 +34,7 @@ def seek_dvs_start(
             event_search_image.fill(0)
             for xy in event_xy_undistorted[i_event:(i_event + batch)]:
                 xy_int = np.rint(xy).astype('int32')
-                xy_bounded = all(xy_int >= 0) and all(xy_int < [dv_cam_width[i], dv_cam_height[i]])
+                xy_bounded = all(xy_int >= 0) and all(xy_int < [dvs_cam_width[i], dvs_cam_height[i]])
                 if xy_bounded:
                     event_search_image[xy_int[1], xy_int[0]] = 255
 
