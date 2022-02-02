@@ -471,6 +471,7 @@ def projection(path_data):
     frame = [None for i in range(n_cameras)]
 
     dvs_start_timestamp = seek_dvs_start(
+        n_cameras,
         raw_events_file, raw_events_iter,
         raw_frames_file, raw_frames_iter,
         start_signal_delay_secs=3)

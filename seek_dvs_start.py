@@ -5,6 +5,7 @@ Manually find first DVS event and frame after start signal
 '''
 
 def seek_dvs_start(
+        n_cameras,
         events_file, events_iter,
         frames_file, frames_iter,
         start_signal_delay_secs=3):
