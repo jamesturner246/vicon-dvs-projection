@@ -118,10 +118,6 @@ def projection(path_data):
     vicon_bad_pose_timeout = 100
     vicon_buffer_length = 300
 
-    # closer props may need more dilation
-    prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
-
-
     dv_cam_height = [np.uint32(260) for i in range(n_cameras)]
     dv_cam_width = [np.uint32(346) for i in range(n_cameras)]
     dv_cam_origin_x_offset = [dv_cam_width[i] / 2 for i in range(n_cameras)]
@@ -137,13 +133,10 @@ def projection(path_data):
     ##################################################################
 
     # === READ PROPS DATA ===
-
-    # props_markers:      contains the translation of each marker, relative to prop origin
-    # props_meshes:       contains prop STL meshes (polygon, translation, vertex)
-    # props_labels:       contains integer > 0 class labels of the props
-    props_markers = {}
-    props_meshes = {}
-    props_labels = {}
+    props_markers = {}    # contains the translation of each marker, relative to prop origin
+    props_meshes = {}     # contains prop STL meshes (polygon, translation, vertex)
+    props_labels = {}     # contains integer > 0 class labels of the props
+    props_dilation = {}   # contains dilation kernels for the mask of each prop
 
     props_names = list(info_json['prop_marker_files'].keys())
     for prop_name in props_names:
@@ -153,6 +146,11 @@ def projection(path_data):
         mesh = stl.mesh.Mesh.from_file(info_json['prop_mesh_files'][prop_name]).vectors.transpose(0, 2, 1)
         props_meshes[prop_name] = mesh
         props_labels[prop_name] = info_json['prop_labels'][prop_name]
+        props_dilation[prop_name] = np.ones((3, 3), 'uint8')
+
+    #props_dilation['kth_hammer'] = np.ones((4, 4), 'uint8')
+    #props_dilation['kth_screwdriver'] = np.ones((4, 4), 'uint8')
+    #props_dilation['kth_spanner'] = np.ones((4, 4), 'uint8')
 
 
     ##################################################################
@@ -579,7 +577,7 @@ def projection(path_data):
 
                 # compute prop mask
                 cv2.fillPoly(prop_masks[i][prop_name], dv_space_p_int, 255)
-                prop_masks[i][prop_name] = cv2.dilate(prop_masks[i][prop_name], prop_mask_dilation_kernel)
+                prop_masks[i][prop_name] = cv2.dilate(prop_masks[i][prop_name], props_dilation[prop_name])
 
 
 
