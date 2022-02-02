@@ -469,19 +469,17 @@ def projection(path_data):
     # Seek initial DVS event and frame
     dvs_start_timestamp = seek_dvs_start(
         n_cameras, dv_cam_height, dv_cam_width,
-        raw_events_file, raw_events_iter,
-        raw_frames_file, raw_frames_iter,
-        start_signal_delay_secs=3)
+        raw_events_file, raw_frames_file, start_signal_delay_secs=3)
 
     event = [None for i in range(n_cameras)]
-    event[i] = get_next_event(i, events_iter[i])
-    while event[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
-        event[i] = get_next_event(i, events_iter[i])
-
     frame = [None for i in range(n_cameras)]
-    frame[i] = get_next_frame(i, frames_iter[i])
-    while frame[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
+    for i in range(n_cameras):
+        event[i] = get_next_event(i, events_iter[i])
+        while event[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
+            event[i] = get_next_event(i, raw_events_iter[i])
         frame[i] = get_next_frame(i, frames_iter[i])
+        while frame[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
+            frame[i] = get_next_frame(i, raw_frames_iter[i])
 
 
     # initialise temp memory
