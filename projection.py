@@ -474,10 +474,10 @@ def projection(path_data):
     event = [None for i in range(n_cameras)]
     frame = [None for i in range(n_cameras)]
     for i in range(n_cameras):
-        event[i] = get_next_event(i, events_iter[i])
+        event[i] = get_next_event(i, raw_events_iter[i])
         while event[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
             event[i] = get_next_event(i, raw_events_iter[i])
-        frame[i] = get_next_frame(i, frames_iter[i])
+        frame[i] = get_next_frame(i, raw_frames_iter[i])
         while frame[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
             frame[i] = get_next_frame(i, raw_frames_iter[i])
 
