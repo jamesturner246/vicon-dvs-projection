@@ -15,29 +15,34 @@ import cv2
 import dv
 
 from calibrate_projection import euler_angles_to_rotation_matrix
+from seek_dvs_start import seek_dvs_start
 from events import *
 from frames import *
 from poses import *
 
+# OpenCV colours
+blue = (255, 0, 0)
+green = (0, 255, 0)
+red = (0, 0, 255)
+yellow = (0, 255, 255)
+grey = (50, 50, 50)
 
 n_cameras = 2
 
 
-def get_next_event(camera, event_iter):
+def get_next_event(camera, events_iter):
     event = {}
-    event[f'timestamp_{camera}'] = next(event_iter[f'timestamp_{camera}'])
-    event[f'polarity_{camera}'] = next(event_iter[f'polarity_{camera}'])
-    event[f'xy_raw_{camera}'] = next(event_iter[f'xy_raw_{camera}'])
-    event[f'xy_undistorted_{camera}'] = next(event_iter[f'xy_undistorted_{camera}'])
+    event[f'timestamp_{camera}'] = next(events_iter[f'timestamp_{camera}'])
+    event[f'polarity_{camera}'] = next(events_iter[f'polarity_{camera}'])
+    event[f'xy_undistorted_{camera}'] = next(events_iter[f'xy_undistorted_{camera}'])
 
     return event
 
 
-def get_next_frame(camera, frame_iter):
+def get_next_frame(camera, frames_iter):
     frame = {}
-    frame[f'timestamp_{camera}'] = next(frame_iter[f'timestamp_{camera}'])
-    frame[f'image_raw_{camera}'] = next(frame_iter[f'image_raw_{camera}'])
-    frame[f'image_undistorted_{camera}'] = next(frame_iter[f'image_undistorted_{camera}'])
+    frame[f'timestamp_{camera}'] = next(frames_iter[f'timestamp_{camera}'])
+    frame[f'image_undistorted_{camera}'] = next(frames_iter[f'image_undistorted_{camera}'])
 
     return frame
 
@@ -113,6 +118,7 @@ def projection(path_data):
     vicon_bad_pose_timeout = 100
     vicon_buffer_length = 300
 
+    # closer props may need more dilation
     prop_mask_dilation_kernel = np.ones((3, 3), 'uint8')
 
 
@@ -181,8 +187,8 @@ def projection(path_data):
     final_frames_file_name = f'{path_data}/frame.h5'
     final_poses_file_name = f'{path_data}/pose.h5'
 
-    # event_video_file_name = [f'{path_data}/event_{i}_video.avi' for i in range(n_cameras)]
-    # frame_video_file_name = [f'{path_data}/frame_{i}_video.avi' for i in range(n_cameras)]
+    # events_video_file_name = [f'{path_data}/event_{i}_video.avi' for i in range(n_cameras)]
+    # frames_video_file_name = [f'{path_data}/frame_{i}_video.avi' for i in range(n_cameras)]
 
 
     ##################################################################
@@ -436,13 +442,47 @@ def projection(path_data):
     ##################################################################
 
 
+    # load raw DVS event data
+    raw_events_file = []
+    raw_events_iter = []
+    for i in range(n_cameras):
+        e_file = tables.open_file(raw_events_file_name[i], mode='r')
+        e_iter = {}
+        e_iter[f'timestamp_{i}'] = e_file.root[f'timestamp_{i}'].iterrows()
+        e_iter[f'polarity_{i}'] = e_file.root[f'polarity_{i}'].iterrows()
+        e_iter[f'xy_undistorted_{i}'] = e_file.root[f'xy_undistorted_{i}'].iterrows()
+        raw_events_file.append(e_file)
+        raw_events_iter.append(e_iter)
 
-    # constants
-    blue = (255, 0, 0)
-    green = (0, 255, 0)
-    red = (0, 0, 255)
-    yellow = (0, 255, 255)
-    grey = (50, 50, 50)
+    # load raw DVS frame data
+    raw_frames_file = []
+    raw_frames_iter = []
+    for i in range(n_cameras):
+        f_file = tables.open_file(raw_frames_file_name[i], mode='r')
+        f_iter = {}
+        f_iter[f'timestamp_{i}'] = f_file.root[f'timestamp_{i}'].iterrows()
+        f_iter[f'image_undistorted_{i}'] = f_file.root[f'image_undistorted_{i}'].iterrows()
+        raw_frames_file.append(f_file)
+        raw_frames_iter.append(f_iter)
+
+
+    # Seek initial DVS event and frame
+    event = [None for i in range(n_cameras)]
+    frame = [None for i in range(n_cameras)]
+
+    dvs_start_timestamp = seek_dvs_start(
+        raw_events_file, raw_events_iter,
+        raw_frames_file, raw_frames_iter,
+        start_signal_delay_secs=3)
+
+    event[i] = get_next_event(i, events_iter[i])
+    while event[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
+        event[i] = get_next_event(i, events_iter[i])
+
+    frame[i] = get_next_frame(i, frames_iter[i])
+    while frame[i][f'timestamp_{i}'] < dvs_start_timestamp[i]:
+        frame[i] = get_next_frame(i, frames_iter[i])
+
 
     # initialise temp memory
     event_pos = [np.zeros((dv_cam_height[i], dv_cam_width[i]), dtype='uint64') for i in range(n_cameras)]
@@ -454,34 +494,10 @@ def projection(path_data):
     prop_masks = [{prop_name: np.empty((dv_cam_height[i], dv_cam_width[i]), dtype='uint8')
                    for prop_name in props_names} for i in range(n_cameras)]
 
-    # load raw DV event data
-    raw_events_file = []
-    raw_event_iter = []
-    for i in range(n_cameras):
-        e_file = tables.open_file(raw_events_file_name[i], mode='r')
-        e_iter = {}
-        e_iter[f'timestamp_{i}'] = e_file.root[f'timestamp_{i}'].iterrows()
-        e_iter[f'polarity_{i}'] = e_file.root[f'polarity_{i}'].iterrows()
-        e_iter[f'xy_raw_{i}'] = e_file.root[f'xy_raw_{i}'].iterrows()
-        e_iter[f'xy_undistorted_{i}'] = e_file.root[f'xy_undistorted_{i}'].iterrows()
-        raw_events_file.append(e_file)
-        raw_event_iter.append(e_iter)
-
-    # load raw DV frame data
-    raw_frames_file = []
-    raw_frame_iter = []
-    for i in range(n_cameras):
-        f_file = tables.open_file(raw_frames_file_name[i], mode='r')
-        f_iter = {}
-        f_iter[f'timestamp_{i}'] = f_file.root[f'timestamp_{i}'].iterrows()
-        f_iter[f'image_raw_{i}'] = f_file.root[f'image_raw_{i}'].iterrows()
-        f_iter[f'image_undistorted_{i}'] = f_file.root[f'image_undistorted_{i}'].iterrows()
-        raw_frames_file.append(f_file)
-        raw_frame_iter.append(f_iter)
-
     # load final Vicon pose data file
     final_poses_file = tables.open_file(final_poses_file_name, mode='r')
     final_poses_iter = {}
+
     timestamp = final_poses_file.root.timestamp
     final_poses_iter['timestamp'] = timestamp.iterrows()
 
@@ -506,96 +522,17 @@ def projection(path_data):
             cam_translation = final_poses_file.root.props[prop_name][f'camera_{i}_translation']
             final_poses_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
 
-    # create final DV event and frame data files
-    final_events_file, final_event_data = create_pytables_events_file(final_events_file_name, n_cameras)
-    final_frames_file, final_frame_data = create_pytables_frames_file(final_frames_file_name, n_cameras)
+    # create final DVS event and frame data files
+    final_events_file, final_events_data = create_pytables_events_file(final_events_file_name, n_cameras)
+    final_frames_file, final_frames_data = create_pytables_frames_file(final_frames_file_name, n_cameras)
 
     # # initialise video recordings
-    # event_video_file = [cv2.VideoWriter(
-    #     event_video_file_name[i], cv2.VideoWriter_fourcc(*'MJPG'),
-    #     30, (dv_cam_width[i], dv_cam_height[i])) for i in range(n_cameras)]
-    # frame_video_file = [cv2.VideoWriter(
-    #     frame_video_file_name[i], cv2.VideoWriter_fourcc(*'MJPG'),
-    #     30, (dv_cam_width[i], dv_cam_height[i])) for i in range(n_cameras)]
-
-
-    # manually find first DV event and frame
-    dv_start_timestamp = [None for i in range(n_cameras)]
-    event = [None for i in range(n_cameras)]
-    frame = [None for i in range(n_cameras)]
-    for i in range(n_cameras):
-        search_image = np.empty((dv_cam_height[i], dv_cam_width[i] * 2, 3), dtype='uint8')
-        event_search_image = search_image[:, :dv_cam_width[i]]
-        frame_search_image = search_image[:, dv_cam_width[i]:]
-
-        batch = 30
-        i_event = 0
-        n_event = len(raw_events_file[i].root[f'timestamp_{i}'])
-        event_timestamp = raw_events_file[i].root[f'timestamp_{i}']
-        event_xy_undistorted = raw_events_file[i].root[f'xy_undistorted_{i}']
-
-        i_frame = 0
-        n_frame = len(raw_frames_file[i].root[f'timestamp_{i}'])
-        frame_timestamp = raw_frames_file[i].root[f'timestamp_{i}']
-        frame_image_undistorted = raw_frames_file[i].root[f'image_undistorted_{i}']
-
-        while True:
-            # search events
-            event_search_image.fill(0)
-            for xy in event_xy_undistorted[i_event:(i_event + batch)]:
-                xy_int = np.rint(xy).astype('int32')
-                xy_bounded = all(xy_int >= 0) and all(xy_int < [dv_cam_width[i], dv_cam_height[i]])
-                if xy_bounded:
-                    event_search_image[xy_int[1], xy_int[0]] = 255
-
-            # search frames
-            if frame_timestamp[i_frame] < event_timestamp[i_event]:
-                while True:
-                    i_frame += 1
-                    if i_frame == n_frame:
-                        i_frame -= 1
-                        break
-                    if frame_timestamp[i_frame] > event_timestamp[i_event]:
-                        i_frame -= 1
-                        break
-            elif frame_timestamp[i_frame] > event_timestamp[i_event]:
-                while True:
-                    i_frame -= 1
-                    if i_frame < 0:
-                        i_frame = 0
-                        break
-                    if frame_timestamp[i_frame] <= event_timestamp[i_event]:
-                        break
-            frame_search_image[:] = frame_image_undistorted[i_frame]
-
-            print(f'dv {i} timestamps (usec):'
-                  f'  event: {event_timestamp[i_event]:,}:'
-                  f'  frame: {frame_timestamp[i_frame]:,}', end='\r')
-
-            cv2.imshow(f'find first dv {i} event and frame', search_image)
-            k = cv2.waitKey(0)
-            if k == ord(' '):
-                cv2.destroyWindow(f'find first dv {i} event and frame')
-                break
-            elif k == ord(','):
-                i_event = max(i_event - batch, 0)
-            elif k == ord('<'):
-                i_event = max(i_event - (50 * batch), 0)
-            elif k == ord('.'):
-                i_event = min(i_event + batch, n_event - 1)
-            elif k == ord('>'):
-                i_event = min(i_event + (50 * batch), n_event - 1)
-
-        print()
-
-        dv_start_timestamp[i] = np.uint64(event_timestamp[i_event] + 3000000) # plus 3 seconds
-        event[i] = get_next_event(i, raw_event_iter[i])
-        while event[i][f'timestamp_{i}'] < dv_start_timestamp[i]:
-            event[i] = get_next_event(i, raw_event_iter[i])
-        frame[i] = get_next_frame(i, raw_frame_iter[i])
-        while frame[i][f'timestamp_{i}'] < dv_start_timestamp[i]:
-            frame[i] = get_next_frame(i, raw_frame_iter[i])
-
+    # events_video_file = [cv2.VideoWriter(
+    #     events_video_file_name[i], cv2.VideoWriter_fourcc(*'MJPG'),
+    #     330, (dv_cam_width[i], dv_cam_height[i])) for i in range(n_cameras)]
+    # frames_video_file = [cv2.VideoWriter(
+    #     frames_video_file_name[i], cv2.VideoWriter_fourcc(*'MJPG'),
+    #     330, (dv_cam_width[i], dv_cam_height[i])) for i in range(n_cameras)]
 
     # get first Vicon pose
     pose = get_next_pose(final_poses_iter)
@@ -629,7 +566,7 @@ def projection(path_data):
                 if not np.isfinite(mesh_to_dv_rotation).all() or not np.isfinite(mesh_to_dv_translation).all():
                     continue
 
-                # transform to DV camera space
+                # transform to DVS camera space
                 dv_space_p = np.matmul(mesh_to_dv_rotation, props_meshes[prop_name]) + mesh_to_dv_translation
                 dv_space_p[:, :2, :] *= (1 / dv_space_p[:, np.newaxis, 2, :])
                 dv_space_p = dv_space_p[:, :2, :]
@@ -648,17 +585,32 @@ def projection(path_data):
 
 
 
-        # process DV frames
+        # process DVS frames
         for i in range(n_cameras):
             if not done_frame[i]:
 
-                timestamp = frame[i][f'timestamp_{i}'] - dv_start_timestamp[i]
+                timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
                 while timestamp <= pose['timestamp']:
                     image = frame_image[i]
                     label = frame_label[i]
                     label_depth = frame_label_depth[i]
 
-                    # mask DV frame image
+                    # get frame label
+                    label.fill(0)
+                    label_depth.fill(np.inf)
+                    for prop_name in props_names:
+                        mask = prop_masks[i][prop_name].astype('bool')
+                        prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
+                        label[mask & (prop_depth < label_depth)] = props_labels[prop_name]
+                        label_depth[mask & (prop_depth < label_depth)] = prop_depth
+
+                    # record final frame data
+                    final_frames_data[f'timestamp_{i}'].append([timestamp])
+                    final_frames_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
+                    final_frames_data[f'label_{i}'].append([label])
+
+
+                    # mask DVS frame image
                     image[:] = frame[i][f'image_undistorted_{i}']
                     for prop_name in props_names:
                         mask = prop_masks[i][prop_name].astype('bool')
@@ -675,25 +627,10 @@ def projection(path_data):
                     # dv_space_p_int = np.rint(dv_space_p).astype('int32')
                     # cv2.circle(image, (dv_space_p_int[0], dv_space_p_int[1]), 3, (0, 255, 0), -1)
 
-                    # get frame label
-                    label.fill(0)
-                    label_depth.fill(np.inf)
-                    for prop_name in props_names:
-                        mask = prop_masks[i][prop_name].astype('bool')
-                        prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
-                        label[mask & (prop_depth < label_depth)] = props_labels[prop_name]
-                        label_depth[mask & (prop_depth < label_depth)] = prop_depth
+                    # # write DVS frame video
+                    # frames_video_file[i].write(image)
 
-                    # record final frame data
-                    final_frame_data[f'timestamp_{i}'].append([timestamp])
-                    final_frame_data[f'image_raw_{i}'].append([frame[i][f'image_raw_{i}']])
-                    final_frame_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
-                    final_frame_data[f'label_{i}'].append([label])
-
-                    # # write DV frame video
-                    # frame_video_file[i].write(image)
-
-                    # show DV frame image
+                    # show DVS frame image
                     cv2.imshow(f'frame {i} image', image)
                     k = cv2.waitKey(1)
                     if k == ord('q'):
@@ -701,17 +638,17 @@ def projection(path_data):
                         done_frame[i] = True
 
                     try:
-                        frame[i] = get_next_frame(i, raw_frame_iter[i])
+                        frame[i] = get_next_frame(i, raw_frames_iter[i])
                     except StopIteration:
                         #print(f'DEBUG: out of dv {i} frames')
                         done_frame[i] = True
                         break
 
-                    timestamp = frame[i][f'timestamp_{i}'] - dv_start_timestamp[i]
+                    timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
 
 
 
-        # process DV events
+        # process DVS events
         for i in range(n_cameras):
             if not done_event[i]:
 
@@ -723,10 +660,10 @@ def projection(path_data):
                 pos.fill(0)
                 neg.fill(0)
 
-                timestamp = event[i][f'timestamp_{i}'] - dv_start_timestamp[i]
+                timestamp = event[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
                 while timestamp < pose_midway:
 
-                    # check DV event is in frame
+                    # check DVS event is in frame
                     xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
                     xy_bounded = all(xy_int >= 0) and all(xy_int < [dv_cam_width[i], dv_cam_height[i]])
 
@@ -756,24 +693,24 @@ def projection(path_data):
                                     label_depth = prop_depth
 
                         # record final event data
-                        final_event_data[f'timestamp_{i}'].append([timestamp])
-                        final_event_data[f'polarity_{i}'].append([event[i][f'polarity_{i}']])
-                        final_event_data[f'xy_raw_{i}'].append([event[i][f'xy_raw_{i}']])
-                        final_event_data[f'xy_undistorted_{i}'].append([event[i][f'xy_undistorted_{i}']])
-                        final_event_data[f'label_{i}'].append([label])
+                        final_events_data[f'timestamp_{i}'].append([timestamp])
+                        final_events_data[f'polarity_{i}'].append([event[i][f'polarity_{i}']])
+                        final_events_data[f'xy_undistorted_{i}'].append([event[i][f'xy_undistorted_{i}']])
+                        final_events_data[f'label_{i}'].append([label])
 
                     try:
-                        event[i] = get_next_event(i, raw_event_iter[i])
+                        event[i] = get_next_event(i, raw_events_iter[i])
                     except StopIteration:
                         #print(f'DEBUG: out of dv {i} events')
                         done_event[i] = True
                         break
 
-                    timestamp = event[i][f'timestamp_{i}'] - dv_start_timestamp[i]
+                    timestamp = event[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
 
 
-                # fill DV event image with events, then mask it
+                # fill DVS event image with events, then mask it
                 for prop_name in props_names:
+                    # FIXME: image[mask] = grey will overwrite events from other props
                     mask = prop_masks[i][prop_name].astype('bool')
                     image[mask] = grey # show prop mask?
                     if event_distinguish_polarity:
@@ -785,10 +722,10 @@ def projection(path_data):
                         mask_pos_neg = neg.astype('bool') | pos.astype('bool')
                         image[(mask_pos_neg & mask)] = red
 
-                # # write DV event video
-                # event_video_file[i].write(image)
+                # # write DVS event video
+                # events_video_file[i].write(image)
 
-                # show DV event image
+                # show DVS event image
                 cv2.imshow(f'event {i} image', image)
                 k = cv2.waitKey(1)
                 if k == ord('q'):
@@ -809,8 +746,8 @@ def projection(path_data):
     final_poses_file.close()
 
     # for i in range(n_cameras):
-    #     event_video_file[i].release()
-    #     frame_video_file[i].release()
+    #     events_video_file[i].release()
+    #     frames_video_file[i].release()
 
     return
 
