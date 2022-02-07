@@ -103,9 +103,6 @@ def get_next_pose(poses_iter):
     return pose
 
 
-
-
-
 def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width):
     if os.path.exists(data_file_name):
         os.remove(data_file_name)
@@ -113,21 +110,22 @@ def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_
     data_file = tables.open_file(data_file_name, mode='a')
     data = {}
 
-
-
-    # TODO: PROJECTED PROP XY FOR EACH POSE
-    # TODO: EVENT FRAME FOR EACH POSE
-
-
-
     data['timestamp'] = data_file.create_earray(
         data_file.root, 'timestamp', tables.atom.UInt64Atom(), (0,))
+
+    for i in range(n_cameras):
+        data[f'camera_{i}_events'] = data_file.create_earray(
+            data_file.root, f'camera_{i}_events', tables.atom.UInt8Atom(),
+            (0, dvs_cam_height[i], dvs_cam_width[i], 2))
 
     for i in range(n_cameras):
         data[f'camera_{i}_rotation'] = {}
 
     for i in range(n_cameras):
         data[f'camera_{i}_translation'] = {}
+
+    for i in range(n_cameras):
+        data[f'camera_{i}_xy'] = {}
 
     g_props = data_file.create_group(data_file.root, 'props')
     for prop_name in props_markers.keys():
@@ -141,10 +139,11 @@ def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_
             data[f'camera_{i}_translation'][prop_name] = data_file.create_earray(
                 g_prop, f'camera_{i}_translation', tables.atom.Float64Atom(), (0, 3, 1))
 
+        for i in range(n_cameras):
+            data[f'camera_{i}_xy'][prop_name] = data_file.create_earray(
+                g_prop, f'camera_{i}_xy', tables.atom.UInt16Atom(), (0, 2))
+
     return data_file, data
-
-
-
 
 
 def projection(path_data):
