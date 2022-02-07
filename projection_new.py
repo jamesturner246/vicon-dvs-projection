@@ -103,7 +103,8 @@ def get_next_pose(poses_iter):
     return pose
 
 
-def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width):
+def create_pytables_poses_events_file(
+        data_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width):
     if os.path.exists(data_file_name):
         os.remove(data_file_name)
 
@@ -141,7 +142,7 @@ def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_
 
         for i in range(n_cameras):
             data[f'camera_{i}_xy'][prop_name] = data_file.create_earray(
-                g_prop, f'camera_{i}_xy', tables.atom.UInt16Atom(), (0, 2))
+                g_prop, f'camera_{i}_xy', tables.atom.Float64Atom(), (0, 2))
 
     return data_file, data
 
@@ -529,12 +530,14 @@ def projection(path_data):
 
 
     # initialise temp memory
+    pose_xy = [np.zeros((2,), dtype='float64') for i in range(n_cameras)]
     event_pos = [np.zeros((dvs_cam_height[i], dvs_cam_width[i]), dtype='uint64') for i in range(n_cameras)]
     event_neg = [np.zeros((dvs_cam_height[i], dvs_cam_width[i]), dtype='uint64') for i in range(n_cameras)]
     event_image = [np.zeros((dvs_cam_height[i], dvs_cam_width[i], 3), dtype='uint8') for i in range(n_cameras)]
-    frame_image = [np.zeros((dvs_cam_height[i], dvs_cam_width[i], 3), dtype='uint8') for i in range(n_cameras)]
-    frame_label = [np.zeros((dvs_cam_height[i], dvs_cam_width[i]), dtype='int8') for i in range(n_cameras)]
-    frame_label_depth = [np.zeros((dvs_cam_height[i], dvs_cam_width[i]), dtype='float64') for i in range(n_cameras)]
+    event_accumulated = [np.zeros((dvs_cam_height[i], dvs_cam_width[i], 2), dtype='uint8') for i in range(n_cameras)]
+    # frame_image = [np.zeros((dvs_cam_height[i], dvs_cam_width[i], 3), dtype='uint8') for i in range(n_cameras)]
+    # frame_label = [np.zeros((dvs_cam_height[i], dvs_cam_width[i]), dtype='int8') for i in range(n_cameras)]
+    # frame_label_depth = [np.zeros((dvs_cam_height[i], dvs_cam_width[i]), dtype='float64') for i in range(n_cameras)]
     prop_masks = [{prop_name: np.empty((dvs_cam_height[i], dvs_cam_width[i]), dtype='uint8')
                    for prop_name in props_names} for i in range(n_cameras)]
 
@@ -567,8 +570,14 @@ def projection(path_data):
             final_poses_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
 
     # create final DVS event and frame data files
-    final_events_file, final_events_data = create_pytables_final_events_file(final_events_file_name, n_cameras)
+    # final_events_file, final_events_data = create_pytables_final_events_file(final_events_file_name, n_cameras)
     # final_frames_file, final_frames_data = create_pytables_final_frames_file(final_frames_file_name, n_cameras)
+
+
+    poses_events_file_name = f'{path_data}/data_pose_event.h5'
+    poses_events_file, poses_events_data = create_pytables_poses_events_file(
+        poses_events_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width):
+
 
     # # initialise video recordings
     # events_video_file = [cv2.VideoWriter(
@@ -585,7 +594,7 @@ def projection(path_data):
 
     # === MAIN LOOP ===
     done_event = [False for i in range(n_cameras)]
-    done_frame = [False for i in range(n_cameras)]
+    done_frame = [True for i in range(n_cameras)]
     while not all(done_event) or not all(done_frame):
 
         try:
@@ -598,17 +607,42 @@ def projection(path_data):
         print()
         print('Vicon pose timestamp: ', pose['timestamp'])
 
+        # write timestamp to h5 file
+        poses_events_data['timestamp'].append([pose['timestamp']])
+
         for prop_name in props_names:
 
             # compute prop mask for each camera
             for i in range(n_cameras):
                 prop_masks[i][prop_name].fill(0)
 
+                xy = pose_xy[i]
+
+                # write pose to h5 file
+                poses_events_data[f'camera_{i}_rotation'][prop_name].append(
+                    [pose[f'camera_{i}_rotation'][prop_name]])
+                poses_events_data[f'camera_{i}_translation'][prop_name].append(
+                    [pose[f'camera_{i}_translation'][prop_name]])
+
                 mesh_to_dvs_rotation = pose[f'camera_{i}_rotation'][prop_name]
                 mesh_to_dvs_translation = pose[f'camera_{i}_translation'][prop_name]
 
                 if not np.isfinite(mesh_to_dvs_rotation).all() or not np.isfinite(mesh_to_dvs_translation).all():
+                    # write xy to h5 file
+                    xy[:] = np.nan
+                    poses_events_data[f'camera_{i}_xy'][prop_name].append([xy])
                     continue
+
+                # write xy to h5 file
+                dvs_space_p = pose[f'camera_{i}_translation'][prop_name].T[0]
+                xy[:] = dvs_space_p[:2] * (1 / dvs_space_p[2])
+                xy *= v_to_dvs_f_len[i]
+                xy /= dvs_cam_pixel_mm[i]
+                xy *= v_to_dvs_x_scale[i]
+                xy += [dvs_cam_origin_x_offset[i], dvs_cam_origin_y_offset[i]]
+                if not (0 <= xy[0] < dvs_cam_width[i]) or not (0 <= xy[1] < dvs_cam_height[i]):
+                    xy[:] = np.nan
+                poses_events_data[f'camera_{i}_xy'][prop_name].append([xy])
 
                 # transform to DVS camera space
                 dvs_space_p = np.matmul(mesh_to_dvs_rotation, props_meshes[prop_name]) + mesh_to_dvs_translation
@@ -626,6 +660,100 @@ def projection(path_data):
                 # compute prop mask
                 cv2.fillPoly(prop_masks[i][prop_name], dvs_space_p_int, 255)
                 prop_masks[i][prop_name] = cv2.dilate(prop_masks[i][prop_name], props_dilation[prop_name])
+
+
+
+        # process DVS events
+        for i in range(n_cameras):
+            if not done_event[i]:
+
+                pos = event_pos[i]
+                neg = event_neg[i]
+                image = event_image[i]
+                accumulated = event_accumulated[i]
+
+                pos.fill(0)
+                neg.fill(0)
+                image.fill(0)
+                accumulated.fill(0)
+
+                timestamp = event[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
+                while timestamp < pose_midway:
+
+                    # check DVS event is in frame
+                    xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
+                    xy_bounded = all(xy_int >= 0) and all(xy_int < [dvs_cam_width[i], dvs_cam_height[i]])
+
+                    accumulated[xy_int[1], xy_int[0], event[i][f'polarity_{i}']] += 1
+
+                    if xy_bounded:
+                        if event[i][f'polarity_{i}']:
+                            pos[xy_int[1], xy_int[0]] += 1
+                        else:
+                            neg[xy_int[1], xy_int[0]] += 1
+
+                        if event_distinguish_polarity:
+                            if event[i][f'polarity_{i}']:
+                                image[xy_int[1], xy_int[0]] = red
+                            else:
+                                image[xy_int[1], xy_int[0]] = green
+                        else:
+                            image[xy_int[1], xy_int[0]] = green
+
+                        # get event label
+                        label = 0
+                        label_depth = np.inf
+                        for prop_name in props_names:
+                            mask = prop_masks[i][prop_name].astype('bool')
+                            prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
+                            if mask[xy_int[1], xy_int[0]]:
+                                if prop_depth < label_depth:
+                                    label = props_labels[prop_name]
+                                    label_depth = prop_depth
+
+                        # record final event data
+                        # final_events_data[f'timestamp_{i}'].append([timestamp])
+                        # final_events_data[f'polarity_{i}'].append([event[i][f'polarity_{i}']])
+                        # final_events_data[f'xy_undistorted_{i}'].append([event[i][f'xy_undistorted_{i}']])
+                        # final_events_data[f'label_{i}'].append([label])
+
+                    try:
+                        event[i] = get_next_event(i, raw_events_iter[i])
+                    except StopIteration:
+                        #print(f'DEBUG: out of dv {i} events')
+                        done_event[i] = True
+                        break
+
+                    timestamp = event[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
+
+
+                # write accumulated events to h5 file
+                poses_events_data[f'camera_{i}_events'].append([event_accumulated[i]])
+
+
+                # fill DVS event image with events, then mask it
+                for prop_name in props_names:
+                    # FIXME: image[mask] = grey will overwrite events from other props
+                    mask = prop_masks[i][prop_name].astype('bool')
+                    image[mask] = grey # show prop mask?
+                    if event_distinguish_polarity:
+                        mask_neg = neg > pos
+                        image[(mask_neg & mask)] = blue
+                        mask_pos = pos > neg
+                        image[(mask_pos & mask)] = yellow
+                    else:
+                        mask_pos_neg = neg.astype('bool') | pos.astype('bool')
+                        image[(mask_pos_neg & mask)] = red
+
+                # # write DVS event video
+                # events_video_file[i].write(image)
+
+                # show DVS event image
+                cv2.imshow(f'event {i} image', image)
+                k = cv2.waitKey(1)
+                if k == ord('q'):
+                    cv2.destroyWindow(f'event {i} image')
+                    done_event[i] = True
 
 
 
@@ -691,92 +819,6 @@ def projection(path_data):
         #             timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
 
 
-
-        # process DVS events
-        for i in range(n_cameras):
-            if not done_event[i]:
-
-                image = event_image[i]
-                pos = event_pos[i]
-                neg = event_neg[i]
-
-                image.fill(0)
-                pos.fill(0)
-                neg.fill(0)
-
-                timestamp = event[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
-                while timestamp < pose_midway:
-
-                    # check DVS event is in frame
-                    xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
-                    xy_bounded = all(xy_int >= 0) and all(xy_int < [dvs_cam_width[i], dvs_cam_height[i]])
-
-                    if xy_bounded:
-                        if event[i][f'polarity_{i}']:
-                            pos[xy_int[1], xy_int[0]] += 1
-                        else:
-                            neg[xy_int[1], xy_int[0]] += 1
-
-                        if event_distinguish_polarity:
-                            if event[i][f'polarity_{i}']:
-                                image[xy_int[1], xy_int[0]] = red
-                            else:
-                                image[xy_int[1], xy_int[0]] = green
-                        else:
-                            image[xy_int[1], xy_int[0]] = green
-
-                        # get event label
-                        label = 0
-                        label_depth = np.inf
-                        for prop_name in props_names:
-                            mask = prop_masks[i][prop_name].astype('bool')
-                            prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
-                            if mask[xy_int[1], xy_int[0]]:
-                                if prop_depth < label_depth:
-                                    label = props_labels[prop_name]
-                                    label_depth = prop_depth
-
-                        # record final event data
-                        final_events_data[f'timestamp_{i}'].append([timestamp])
-                        final_events_data[f'polarity_{i}'].append([event[i][f'polarity_{i}']])
-                        final_events_data[f'xy_undistorted_{i}'].append([event[i][f'xy_undistorted_{i}']])
-                        final_events_data[f'label_{i}'].append([label])
-
-                    try:
-                        event[i] = get_next_event(i, raw_events_iter[i])
-                    except StopIteration:
-                        #print(f'DEBUG: out of dv {i} events')
-                        done_event[i] = True
-                        break
-
-                    timestamp = event[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
-
-
-                # fill DVS event image with events, then mask it
-                for prop_name in props_names:
-                    # FIXME: image[mask] = grey will overwrite events from other props
-                    mask = prop_masks[i][prop_name].astype('bool')
-                    image[mask] = grey # show prop mask?
-                    if event_distinguish_polarity:
-                        mask_neg = neg > pos
-                        image[(mask_neg & mask)] = blue
-                        mask_pos = pos > neg
-                        image[(mask_pos & mask)] = yellow
-                    else:
-                        mask_pos_neg = neg.astype('bool') | pos.astype('bool')
-                        image[(mask_pos_neg & mask)] = red
-
-                # # write DVS event video
-                # events_video_file[i].write(image)
-
-                # show DVS event image
-                cv2.imshow(f'event {i} image', image)
-                k = cv2.waitKey(1)
-                if k == ord('q'):
-                    cv2.destroyWindow(f'event {i} image')
-                    done_event[i] = True
-
-
         pose = pose_new
 
 
@@ -785,9 +827,10 @@ def projection(path_data):
     for i in range(n_cameras):
         raw_events_file[i].close()
         raw_frames_file[i].close()
-    final_events_file.close()
+    # final_events_file.close()
     # final_frames_file.close()
     final_poses_file.close()
+    poses_events_file.close()
 
     # for i in range(n_cameras):
     #     events_video_file[i].release()
