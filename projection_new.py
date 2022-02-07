@@ -576,7 +576,7 @@ def projection(path_data):
 
     poses_events_file_name = f'{path_data}/data_pose_event.h5'
     poses_events_file, poses_events_data = create_pytables_poses_events_file(
-        poses_events_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width):
+        poses_events_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width)
 
 
     # # initialise video recordings
@@ -684,9 +684,9 @@ def projection(path_data):
                     xy_int = np.rint(event[i][f'xy_undistorted_{i}']).astype('int32')
                     xy_bounded = all(xy_int >= 0) and all(xy_int < [dvs_cam_width[i], dvs_cam_height[i]])
 
-                    accumulated[xy_int[1], xy_int[0], event[i][f'polarity_{i}']] += 1
-
                     if xy_bounded:
+                        accumulated[xy_int[1], xy_int[0], event[i][f'polarity_{i}']] += 1
+
                         if event[i][f'polarity_{i}']:
                             pos[xy_int[1], xy_int[0]] += 1
                         else:
