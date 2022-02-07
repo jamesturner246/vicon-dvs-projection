@@ -97,7 +97,7 @@ def get_vicon_network_poses(record_time, address, port, props_markers, poses_fil
 
 
 def WITHOUT_NUMPY_get_dvs_aedat_file_events(camera, n_cameras, aedat_file_name, mtx, dist, events_file_name):
-    events_file, events_data = create_pytables_events_file(events_file_name, n_cameras)
+    events_file, events_data = create_pytables_raw_events_file(events_file_name, n_cameras)
 
     print(f'get camera {camera} event data')
     with dv.AedatFile(aedat_file_name) as f:
@@ -123,7 +123,7 @@ def WITHOUT_NUMPY_get_dvs_aedat_file_events(camera, n_cameras, aedat_file_name, 
 
 
 def get_dvs_aedat_file_events(camera, n_cameras, aedat_file_name, mtx, dist, events_file_name):
-    events_file, events_data = create_pytables_events_file(events_file_name, n_cameras)
+    events_file, events_data = create_pytables_raw_events_file(events_file_name, n_cameras)
 
     print(f'get camera {camera} event data')
     with dv.AedatFile(aedat_file_name) as f:
@@ -150,7 +150,7 @@ def get_dvs_aedat_file_events(camera, n_cameras, aedat_file_name, mtx, dist, eve
 
 
 def get_dvs_aedat_file_frames(camera, n_cameras, aedat_file_name, mtx, dist, frames_file_name):
-    frames_file, frames_data = create_pytables_frames_file(frames_file_name, n_cameras)
+    frames_file, frames_data = create_pytables_raw_frames_file(frames_file_name, n_cameras)
 
     print(f'get camera {camera} frame data')
     with dv.AedatFile(aedat_file_name) as f:

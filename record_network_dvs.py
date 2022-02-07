@@ -88,7 +88,7 @@ def get_vicon_network_poses(record_time, address, port, props_markers, poses_fil
 
 
 def get_dvs_network_events(camera, record_time, address, port, mtx, dist, events_file_name):
-    events_file, events_data = create_pytables_events_file(events_file_name, n_cameras)
+    events_file, events_data = create_pytables_raw_events_file(events_file_name, n_cameras)
 
     with dv.NetworkEventInput(address=address, port=port) as f:
         event = next(f)
@@ -113,7 +113,7 @@ def get_dvs_network_events(camera, record_time, address, port, mtx, dist, events
 
 
 def get_dvs_network_frames(camera, record_time, address, port, mtx, dist, frames_file_name):
-    frames_file, frames_data = create_pytables_frames_file(frames_file_name, n_cameras)
+    frames_file, frames_data = create_pytables_raw_frames_file(frames_file_name, n_cameras)
 
     with dv.NetworkFrameInput(address=address, port=port) as f:
         frame = next(f)

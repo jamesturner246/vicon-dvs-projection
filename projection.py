@@ -524,8 +524,8 @@ def projection(path_data):
             final_poses_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
 
     # create final DVS event and frame data files
-    final_events_file, final_events_data = create_pytables_events_file(final_events_file_name, n_cameras)
-    final_frames_file, final_frames_data = create_pytables_frames_file(final_frames_file_name, n_cameras)
+    final_events_file, final_events_data = create_pytables_final_events_file(final_events_file_name, n_cameras)
+    final_frames_file, final_frames_data = create_pytables_final_frames_file(final_frames_file_name, n_cameras)
 
     # # initialise video recordings
     # events_video_file = [cv2.VideoWriter(

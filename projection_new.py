@@ -103,6 +103,9 @@ def get_next_pose(poses_iter):
     return pose
 
 
+
+
+
 def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_height, dvs_cam_width):
     if os.path.exists(data_file_name):
         os.remove(data_file_name)
@@ -139,6 +142,9 @@ def create_pytables_data_file(data_file_name, n_cameras, props_markers, dvs_cam_
                 g_prop, f'camera_{i}_translation', tables.atom.Float64Atom(), (0, 3, 1))
 
     return data_file, data
+
+
+
 
 
 def projection(path_data):
@@ -220,7 +226,7 @@ def projection(path_data):
     raw_poses_file_name = f'{path_data}/raw_pose.h5'
 
     final_events_file_name = f'{path_data}/event.h5'
-    final_frames_file_name = f'{path_data}/frame.h5'
+    # final_frames_file_name = f'{path_data}/frame.h5'
     final_poses_file_name = f'{path_data}/pose.h5'
 
     # events_video_file_name = [f'{path_data}/event_{i}_video.avi' for i in range(n_cameras)]
@@ -562,8 +568,8 @@ def projection(path_data):
             final_poses_iter[f'camera_{i}_translation'][prop_name] = cam_translation.iterrows()
 
     # create final DVS event and frame data files
-    final_events_file, final_events_data = create_pytables_events_file(final_events_file_name, n_cameras)
-    final_frames_file, final_frames_data = create_pytables_frames_file(final_frames_file_name, n_cameras)
+    final_events_file, final_events_data = create_pytables_final_events_file(final_events_file_name, n_cameras)
+    # final_frames_file, final_frames_data = create_pytables_final_frames_file(final_frames_file_name, n_cameras)
 
     # # initialise video recordings
     # events_video_file = [cv2.VideoWriter(
@@ -624,66 +630,66 @@ def projection(path_data):
 
 
 
-        # process DVS frames
-        for i in range(n_cameras):
-            if not done_frame[i]:
+        # # process DVS frames
+        # for i in range(n_cameras):
+        #     if not done_frame[i]:
 
-                timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
-                while timestamp <= pose['timestamp']:
-                    image = frame_image[i]
-                    label = frame_label[i]
-                    label_depth = frame_label_depth[i]
+        #         timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
+        #         while timestamp <= pose['timestamp']:
+        #             image = frame_image[i]
+        #             label = frame_label[i]
+        #             label_depth = frame_label_depth[i]
 
-                    # get frame label
-                    label.fill(0)
-                    label_depth.fill(np.inf)
-                    for prop_name in props_names:
-                        mask = prop_masks[i][prop_name].astype('bool')
-                        prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
-                        label[mask & (prop_depth < label_depth)] = props_labels[prop_name]
-                        label_depth[mask & (prop_depth < label_depth)] = prop_depth
+        #             # get frame label
+        #             label.fill(0)
+        #             label_depth.fill(np.inf)
+        #             for prop_name in props_names:
+        #                 mask = prop_masks[i][prop_name].astype('bool')
+        #                 prop_depth = pose[f'camera_{i}_translation'][prop_name][2, 0]
+        #                 label[mask & (prop_depth < label_depth)] = props_labels[prop_name]
+        #                 label_depth[mask & (prop_depth < label_depth)] = prop_depth
 
-                    # record final frame data
-                    final_frames_data[f'timestamp_{i}'].append([timestamp])
-                    final_frames_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
-                    final_frames_data[f'label_{i}'].append([label])
+        #             # record final frame data
+        #             final_frames_data[f'timestamp_{i}'].append([timestamp])
+        #             final_frames_data[f'image_undistorted_{i}'].append([frame[i][f'image_undistorted_{i}']])
+        #             final_frames_data[f'label_{i}'].append([label])
 
 
-                    # mask DVS frame image
-                    image[:] = frame[i][f'image_undistorted_{i}']
-                    for prop_name in props_names:
-                        mask = prop_masks[i][prop_name].astype('bool')
-                        image[mask, :] = blue
+        #             # mask DVS frame image
+        #             image[:] = frame[i][f'image_undistorted_{i}']
+        #             for prop_name in props_names:
+        #                 mask = prop_masks[i][prop_name].astype('bool')
+        #                 image[mask, :] = blue
 
-                    # # uncomment to plot prop centre translation
-                    # dvs_space_p = pose[f'camera_{i}_translation'][prop_name].T[0]
-                    # dvs_space_p[:2] *= (1 / dvs_space_p[2])
-                    # dvs_space_p = dvs_space_p[:2]
-                    # dvs_space_p *= v_to_dvs_f_len[i]
-                    # dvs_space_p /= dvs_cam_pixel_mm[i]
-                    # dvs_space_p *= v_to_dvs_x_scale[i]
-                    # dvs_space_p += [dvs_cam_origin_x_offset[i], dvs_cam_origin_y_offset[i]]
-                    # dvs_space_p_int = np.rint(dvs_space_p).astype('int32')
-                    # cv2.circle(image, (dvs_space_p_int[0], dvs_space_p_int[1]), 3, (0, 255, 0), -1)
+        #             # # uncomment to plot prop centre translation
+        #             # dvs_space_p = pose[f'camera_{i}_translation'][prop_name].T[0]
+        #             # dvs_space_p[:2] *= (1 / dvs_space_p[2])
+        #             # dvs_space_p = dvs_space_p[:2]
+        #             # dvs_space_p *= v_to_dvs_f_len[i]
+        #             # dvs_space_p /= dvs_cam_pixel_mm[i]
+        #             # dvs_space_p *= v_to_dvs_x_scale[i]
+        #             # dvs_space_p += [dvs_cam_origin_x_offset[i], dvs_cam_origin_y_offset[i]]
+        #             # dvs_space_p_int = np.rint(dvs_space_p).astype('int32')
+        #             # cv2.circle(image, (dvs_space_p_int[0], dvs_space_p_int[1]), 3, (0, 255, 0), -1)
 
-                    # # write DVS frame video
-                    # frames_video_file[i].write(image)
+        #             # # write DVS frame video
+        #             # frames_video_file[i].write(image)
 
-                    # show DVS frame image
-                    cv2.imshow(f'frame {i} image', image)
-                    k = cv2.waitKey(1)
-                    if k == ord('q'):
-                        cv2.destroyWindow(f'frame {i} image')
-                        done_frame[i] = True
+        #             # show DVS frame image
+        #             cv2.imshow(f'frame {i} image', image)
+        #             k = cv2.waitKey(1)
+        #             if k == ord('q'):
+        #                 cv2.destroyWindow(f'frame {i} image')
+        #                 done_frame[i] = True
 
-                    try:
-                        frame[i] = get_next_frame(i, raw_frames_iter[i])
-                    except StopIteration:
-                        #print(f'DEBUG: out of dv {i} frames')
-                        done_frame[i] = True
-                        break
+        #             try:
+        #                 frame[i] = get_next_frame(i, raw_frames_iter[i])
+        #             except StopIteration:
+        #                 #print(f'DEBUG: out of dv {i} frames')
+        #                 done_frame[i] = True
+        #                 break
 
-                    timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
+        #             timestamp = frame[i][f'timestamp_{i}'] - dvs_start_timestamp[i]
 
 
 
@@ -781,7 +787,7 @@ def projection(path_data):
         raw_events_file[i].close()
         raw_frames_file[i].close()
     final_events_file.close()
-    final_frames_file.close()
+    # final_frames_file.close()
     final_poses_file.close()
 
     # for i in range(n_cameras):
