@@ -6,7 +6,7 @@ import dv
 
 
 def get_vicon_network_poses(record_time, address, port, props_markers, poses_file_name):
-    poses_file, data = create_pytables_poses_file(poses_file_name, 0, props_markers)
+    poses_file, data = create_pytables_raw_poses_file(poses_file_name, 0, props_markers)
 
     client = ViconDataStream.Client()
     client.Connect(f'{address}:{port}')
