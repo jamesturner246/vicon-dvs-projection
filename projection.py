@@ -191,17 +191,12 @@ def projection(path_data):
 
     ##################################################################
 
+    # === COMPUTE MESH TO V0 TRANSFORM ===
 
     # load raw Vicon pose data
     raw_poses_file = tables.open_file(raw_poses_file_name, mode='r')
 
-    # create final Vicon pose data file
-    final_poses_file, final_poses_data = create_pytables_poses_file(final_poses_file_name, n_cameras, props_markers)
-
-    # get transforms from mesh space to Vicon space zero
-    mesh_to_v0_rotation = {}
-    mesh_to_v0_translation = {}
-
+    # optimisation
     method = 'nelder-mead'
     options = {'disp': True, 'maxiter': 50000, 'maxfev': 100000, 'xatol': 1e-10, 'fatol': 1e-10}
 
@@ -221,6 +216,10 @@ def projection(path_data):
             error += np.sqrt(np.mean(difference ** 2))
 
         return error
+
+    # get transforms from mesh space to Vicon space zero
+    mesh_to_v0_rotation = {}
+    mesh_to_v0_translation = {}
 
     for prop_name in props_names:
         mesh_markers = []
@@ -270,8 +269,13 @@ def projection(path_data):
         mesh_to_v0_translation[prop_name] = m[3:6, np.newaxis]
 
 
+    ##################################################################
+
     # === PREPROCESS VICON POSE DATA ===
     print('begin preprocessing')
+
+    # create final Vicon pose data file
+    final_poses_file, final_poses_data = create_pytables_poses_file(final_poses_file_name, n_cameras, props_markers)
 
     # get raw Vicon pose data iterators
     raw_poses_iter = {}
