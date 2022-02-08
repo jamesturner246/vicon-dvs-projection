@@ -685,11 +685,11 @@ def projection(path_data):
                     xy_bounded = all(xy_int >= 0) and all(xy_int < [dvs_cam_width[i], dvs_cam_height[i]])
 
                     if xy_bounded:
-                        accumulated[xy_int[1], xy_int[0], event[i][f'polarity_{i}']] += 1
-
                         if event[i][f'polarity_{i}']:
+                            accumulated[xy_int[1], xy_int[0], 1] += 1
                             pos[xy_int[1], xy_int[0]] += 1
                         else:
+                            accumulated[xy_int[1], xy_int[0], 0] += 1
                             neg[xy_int[1], xy_int[0]] += 1
 
                         if event_distinguish_polarity:
