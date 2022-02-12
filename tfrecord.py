@@ -24,20 +24,25 @@ def _serialize_example(shape, events, xy):
     return serialized_example
 
 
-def tfrecord_from_h5(directory, h5_file_name):
+def tfrecord_from_h5(in_directory, h5_file_name, out_directory=None, tfr_file_name=None):
     i = 0 # camera index
 
-    name = h5_file_name.split('.')[0]
-    h5_file_path = f'{directory}/{h5_file_name}'
-    tfr_file_path = f'{directory}/{name}.tfrecord'
+    if out_directory is None:
+        out_directory = in_directory
+
+    if tfr_file_name is None:
+        tfr_file_name = h5_file_name.split('.')[0] + '.tfrecord'
+
+    h5_file_path = f'{in_directory}/{h5_file_name}'
+    tfr_file_path = f'{out_directory}/{tfr_file_name}'
     print(h5_file_path)
     print(tfr_file_path)
 
     # xy matrix (all props)
-    all_xy = np.empty((3, 2), dtype='float32')
+    all_xy = np.empty((2, 3), dtype='float32')
 
     # Read JSON recording info
-    with open(f'{directory}/info.json', 'r') as info_json_file:
+    with open(f'{in_directory}/info.json', 'r') as info_json_file:
         info_json = json.load(info_json_file)
     props_labels = info_json['prop_labels']
 
@@ -79,7 +84,7 @@ def tfrecord_from_h5(directory, h5_file_name):
 
             all_xy.fill(np.nan)
             for prop_name in props_names:
-                all_xy[props_labels[prop_name] - 1] = xy[prop_name]
+                all_xy[:, props_labels[prop_name] - 1] = xy[prop_name]
 
             tensor_events = tf.convert_to_tensor(events, dtype=tf.uint8)
             tensor_all_xy = tf.convert_to_tensor(all_xy, dtype=tf.float32)
@@ -95,7 +100,34 @@ def tfrecord_from_h5(directory, h5_file_name):
     return
 
 
-def parse_tfrecord(serialized_example):
+def convert_all():
+    out_files = [
+        "screwdriver",
+        "hammer",
+        "spanner",
+        "hammer_screwdriver",
+        "screwdriver_spanner",
+    ]
+
+    dirs = [
+        "./data/20220112_jpt_floating_kth_screwdriver",
+        "./data/20220113_jpt_floating_kth_hammer",
+        "./data/20220113_jpt_floating_kth_spanner",
+        "./data/20220114_jpt_floating_kth_hammer_kth_screwdriver",
+        "./data/20220117_jpt_floating_kth_screwdriver_kth_spanner",
+    ]
+
+    for d, out_file in zip(dirs, out_files):
+        for i in range(3):
+            tfrecord_from_h5(
+                d + "/000" + str(i),
+                "data_pose_event.h5",
+                "./tfrecord",
+                out_file + "_000" + str(i) + ".tfrecord",
+            )
+
+
+def tfrecord_parse(serialized_example):
     feature = {
 	'shape': tf.io.FixedLenFeature((), tf.string),
 	'events': tf.io.FixedLenFeature((), tf.string),
@@ -109,19 +141,35 @@ def parse_tfrecord(serialized_example):
 
     n_class = 3
     xy = tf.io.parse_tensor(example['xy'], out_type=tf.float32)
-    xy = tf.reshape(xy, (n_class, 2))
+    xy = tf.reshape(xy, (2, n_class))
 
-    return {'inputs_events': events, 'outputs_xy': xy}
+    return {'inputs_events': events, 'inputs_xy': xy}
 
 
-def tfrecord_dataset(path, shuffle=False, batch_size=None):
-    files_ds = tf.data.Dataset.list_files(path + '/*.tfrecord', shuffle=True, seed=1)
+def tfrecord_dataset(path, batch_size=None, shuffle_data=False, shuffle_files=False, shuffle_files_seed=None):
+    files_ds = tf.data.Dataset.list_files(path + '/*.tfrecord', shuffle=shuffle_files, seed=shuffle_files_seed)
+
+    files_ds = files_ds.cache()
+
+    if shuffle_files:
+        files_ds = files_ds.shuffle(len(files_ds))
+
     data_ds = files_ds.interleave(tf.data.TFRecordDataset, cycle_length=8, num_parallel_calls=tf.data.AUTOTUNE)
-    if shuffle:
+
+    if shuffle_data:
         data_ds = data_ds.shuffle(buffer_size=8192)
-    data_ds = data_ds.map(parse_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
+
+    # n_data_ds = 0
+    # for x in data_ds:
+    #     n_data_ds += 1
+    # print('number of samples:', n_data_ds)
+    # exit(0)
+
+    data_ds = data_ds.map(tfrecord_parse, num_parallel_calls=tf.data.AUTOTUNE)
+
     if not batch_size is None:
         data_ds = data_ds.batch(batch_size)
+
     data_ds = data_ds.prefetch(tf.data.AUTOTUNE)
 
     return data_ds
@@ -149,9 +197,9 @@ def tfrecord_show(path):
         image.fill(0)
         image[:, :, :2] = events
         image[image > 0] = 255
-        cv2.circle(image, (xy_int[0, 0], xy_int[0, 1]), 3, (0, 0, 255), -1)
-        cv2.circle(image, (xy_int[1, 0], xy_int[1, 1]), 3, (0, 0, 255), -1)
-        cv2.circle(image, (xy_int[2, 0], xy_int[2, 1]), 3, (0, 0, 255), -1)
+        cv2.circle(image, (xy_int[0, 0], xy_int[1, 0]), 3, (0, 0, 255), -1)
+        cv2.circle(image, (xy_int[0, 1], xy_int[1, 1]), 3, (0, 0, 255), -1)
+        cv2.circle(image, (xy_int[0, 2], xy_int[1, 2]), 3, (0, 0, 255), -1)
 
         # show event image
         cv2.imshow(f'camera image', image)
