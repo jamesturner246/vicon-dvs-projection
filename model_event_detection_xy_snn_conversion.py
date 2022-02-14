@@ -6,68 +6,6 @@ import numpy as np
 from tfrecord import *
 
 
-def parse_event_tfrecord(serialized_example):
-    feature = {
-        'shape': tf.io.FixedLenFeature((), tf.string),
-        'frame': tf.io.FixedLenFeature((), tf.string),
-        'object_pose': tf.io.FixedLenFeature((), tf.string),
-        'object_class': tf.io.FixedLenFeature((), tf.string),
-    }
-    example = tf.io.parse_single_example(serialized_example, feature)
-
-    n_class = 3
-
-    shape = tf.io.parse_tensor(example['shape'], out_type=tf.int32)
-    frame = tf.io.parse_tensor(example['frame'], out_type=tf.uint8)
-    frame = tf.reshape(frame, shape)
-    #frame = tf.image.random_flip_left_right(frame) # NOTE: can't flip for pose training without modifying labels
-
-    object_detection = tf.io.parse_tensor(example['object_class'], out_type=tf.float32)
-    object_detection = tf.math.ceil(object_detection)
-    object_detection = tf.reshape(object_detection, (n_class,))
-    object_pose = tf.io.parse_tensor(example['object_pose'], out_type=tf.float32)
-    object_pose = tf.reshape(object_pose, (n_class, 6))[:, :3] # take translation, since rotation is missing
-
-    # Normalise pose to within [-1, 1]
-    # NOTE: object valid (x, y) coordinates (pixels) are initially in ([0, 640], [0, 480])
-    # NOTE: object depth (metres) is initially in [0, 3.5]
-    object_pose_mid = tf.constant([320.0, 240.0, 1.75])
-    object_pose = (object_pose - object_pose_mid) / object_pose_mid
-
-    return {'inputs_frame': frame, 'inputs_detection': object_detection, 'inputs_pose': object_pose}
-
-
-
-
-
-
-
-
-def parse_tfrecord(serialized_example):
-    feature = {
-	'shape': tf.io.FixedLenFeature((), tf.string),
-	'events': tf.io.FixedLenFeature((), tf.string),
-	'xy': tf.io.FixedLenFeature((), tf.string),
-    }
-    example = tf.io.parse_single_example(serialized_example, feature)
-
-    shape = tf.io.parse_tensor(example['shape'], out_type=tf.int32)
-    events = tf.io.parse_tensor(example['events'], out_type=tf.uint8)
-    events = tf.reshape(events, shape)
-
-    n_class = 3
-    xy = tf.io.parse_tensor(example['xy'], out_type=tf.float32)
-    xy = tf.reshape(xy, (n_class, 2))
-
-    return {'inputs_events': events, 'inputs_xy': xy}
-
-
-
-
-
-
-
-
 if __name__ == '__main__':
 
     for gpu in tf.config.experimental.list_physical_devices('GPU'):
@@ -86,7 +24,8 @@ if __name__ == '__main__':
     #epochs = 40
     initial_epoch = 0
     momentum = 0.9
-    dropout_rate = 0.25
+    #dropout_rate = 0.25
+    dropout_rate = 0.5
 
     record_tensorboard = False
 
@@ -172,11 +111,17 @@ if __name__ == '__main__':
             # xy_targets should be [batch_i, (x, y), prop_i]
             assert(len(xy_targets.get_shape()) == 3)
 
-            # convert one-hot detections to sparse
-            detection_reshaped = tf.reshape(detection, (tf.shape(detection)[0], -1, 2))
-            detection_reshaped = tf.transpose(detection_reshaped, perm=(0, 2, 1))
-            detection_predictions = tf.argmax(detection_reshaped, axis=1)
-            detection_predictions = tf.cast(detection_predictions, tf.float32)
+            # # convert one-hot detections to sparse
+            # detection_reshaped = tf.reshape(detection, (tf.shape(detection)[0], -1, 2))
+            # detection_reshaped = tf.transpose(detection_reshaped, perm=(0, 2, 1))
+            # detection_predictions = tf.argmax(detection_reshaped, axis=1)
+            # detection_predictions = tf.cast(detection_predictions, tf.float32)
+
+
+
+            #
+            detection_predictions = detection
+
 
             # convert xy_targets to detection targets
             detection_targets = tf.math.is_finite(xy_targets)[:, 0, :] & tf.math.is_finite(xy_targets)[:, 1, :]
@@ -192,6 +137,41 @@ if __name__ == '__main__':
             accuracy = tf.keras.metrics.binary_accuracy(detection_targets, detection_predictions)
             accuracy_mean = tf.reduce_mean(accuracy)
             self.add_metric(accuracy_mean, name='detection_binary_accuracy')
+
+
+
+
+            # # convert one-hot detections to sparse
+            # detection_reshaped = tf.reshape(detection, (tf.shape(detection)[0], -1, 2))
+            # detection_reshaped = tf.transpose(detection_reshaped, perm=(0, 2, 1))
+            # detection_predictions = tf.argmax(detection_reshaped, axis=1)
+            # detection_predictions = tf.cast(detection_predictions, tf.float32)
+
+            # # convert xy_targets to detection targets
+            # detection_targets = tf.math.is_finite(xy_targets)[:, 0, :] & tf.math.is_finite(xy_targets)[:, 1, :]
+            # detection_targets = tf.cast(detection_targets, tf.float32)
+
+            # tf.print()
+            # tf.print('DDDDDDD')
+            # tf.print(detection_predictions)
+            # tf.print(detection_targets)
+            # tf.print()
+
+            # # Loss: binary crossentropy
+            # loss = tf.keras.losses.sparse_categorical_crossentropy(detection_targets, detection_predictions)
+            # loss_mean = tf.reduce_mean(loss)
+            # loss_mean_weighted = loss_mean * loss_weight
+            # self.add_loss(loss_mean_weighted)
+
+            # # Accuracy: binary accuracy
+            # accuracy = tf.keras.metrics.sparse_categorical_accuracy(detection_targets, detection_predictions)
+            # accuracy_mean = tf.reduce_mean(accuracy)
+            # self.add_metric(accuracy_mean, name='detection_binary_accuracy')
+
+
+
+
+
 
             return detection
 
@@ -257,6 +237,7 @@ if __name__ == '__main__':
 
         # Dense (detection)
         flatten_detection = layers.Flatten(
+            #name='flatten_detection')(pool_2)
             name='flatten_detection')(pool_3)
         dense_detection_1 = layers.Dense(
             filters_detection, use_bias=use_bias, activation='relu',
@@ -264,7 +245,9 @@ if __name__ == '__main__':
         dropout_detection_1 = layers.Dropout(
             dropout_rate, name='dropout_detection_1')(dense_detection_1)
         dense_detection_2 = layers.Dense(
-            2 * n_class, use_bias=use_bias, activation='relu',
+            #2 * n_class, use_bias=use_bias, activation='relu',
+            #kernel_regularizer=regularizer, name='detection_out')(dropout_detection_1)
+            n_class, use_bias=use_bias, activation='sigmoid',
             kernel_regularizer=regularizer, name='detection_out')(dropout_detection_1)
         detection_endpoint = DetectionEndpoint(
             name='detection_endpoint')(dense_detection_2, inputs_xy, 1.0)
@@ -280,7 +263,7 @@ if __name__ == '__main__':
 
 
 
-        # TODO: FIXME: XY MSE LOSS IS NAN
+
 
 
 
@@ -293,7 +276,7 @@ if __name__ == '__main__':
             ],
             outputs=[
                 detection_endpoint,
-                xy_endpoint,
+                #xy_endpoint,
             ],
             name=model_name)
         
